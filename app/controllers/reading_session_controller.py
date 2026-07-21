@@ -1,3 +1,6 @@
+import re
+from difflib import SequenceMatcher
+
 from flask import jsonify, request
 from flask_jwt_extended import current_user
 
@@ -8,6 +11,20 @@ from app.models.book_model import Book
 from app.models.voice_profile_model import VoiceProfile
 from app.models.reading_session_model import ReadingSession
 from app.middleware import child_belongs_to_current_parent, voice_profile_belongs_to_current_parent
+from app.controllers.game_result_controller import _award_leaderboard_points
+
+
+PRONUNCIATION_POINTS = 10
+PRONUNCIATION_PASS_SCORE = 0.8
+
+
+def _book_sentences(text):
+    """Return readable sentence-sized snippets from a book's text."""
+    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+|\n+", text or "") if sentence.strip()]
+
+
+def _normalise_spoken_text(text):
+    return " ".join(re.findall(r"[\w']+", text.lower()))
 
 
 def _session_belongs_to_current_parent(session):
@@ -99,6 +116,80 @@ def get_reading_session(session_id):
     if not _session_belongs_to_current_parent(session):
         return jsonify({"error": "Reading session not found."}), 404
     return jsonify({"reading_session": session.to_dict()}), 200
+
+
+def check_pronunciation(session_id):
+    """Compare browser speech-to-text with a book sentence and award 10 points once."""
+    session = db.session.get(ReadingSession, session_id)
+    if not _session_belongs_to_current_parent(session):
+        return jsonify({"error": "Reading session not found."}), 404
+    if session.completed_at:
+        return jsonify({"error": "This reading session is already complete."}), 400
+
+    data = request.get_json(silent=True) or {}
+    sentence_index = data.get("sentence_index")
+    transcript = data.get("transcript")
+    if not isinstance(sentence_index, int) or sentence_index < 0:
+        return jsonify({"error": "A valid sentence_index is required."}), 400
+    if not isinstance(transcript, str) or not transcript.strip():
+        return jsonify({"error": "A spoken transcript is required."}), 400
+    if len(transcript) > 1000:
+        return jsonify({"error": "The spoken transcript is too long."}), 400
+
+    sentences = _book_sentences(session.book.text_content if session.book else None)
+    if sentence_index >= len(sentences):
+        return jsonify({"error": "That sentence does not exist in this book."}), 400
+
+    expected = _normalise_spoken_text(sentences[sentence_index])
+    spoken = _normalise_spoken_text(transcript)
+    if not expected or not spoken:
+        return jsonify({"error": "We could not compare that reading. Please try again."}), 400
+
+    score = SequenceMatcher(None, expected, spoken).ratio()
+    correct = score >= PRONUNCIATION_PASS_SCORE
+    log = list(session.progress_log or [])
+    already_awarded = any(
+        entry.get("type") == "pronunciation_check"
+        and entry.get("sentence_index") == sentence_index
+        and entry.get("awarded_points") == PRONUNCIATION_POINTS
+        for entry in log
+        if isinstance(entry, dict)
+    )
+    points_awarded = PRONUNCIATION_POINTS if correct and not already_awarded else 0
+
+    try:
+        log.append(
+            {
+                "type": "pronunciation_check",
+                "sentence_index": sentence_index,
+                "transcript": transcript.strip(),
+                "accuracy": round(score * 100),
+                "awarded_points": points_awarded,
+            }
+        )
+        session.progress_log = log
+        if points_awarded:
+            _award_leaderboard_points(session.child_id, points_awarded)
+        db.session.commit()
+        message = (
+            "Great reading! 10 points have been added to the leaderboard."
+            if points_awarded
+            else "Great reading! This sentence was already rewarded."
+            if correct
+            else "Keep trying — read the sentence again a little more clearly."
+        )
+        return jsonify(
+            {
+                "correct": correct,
+                "accuracy": round(score * 100),
+                "points_awarded": points_awarded,
+                "already_awarded": already_awarded,
+                "message": message,
+            }
+        ), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 def list_child_reading_sessions(child_id):
