@@ -1,12 +1,14 @@
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 from email_validator import validate_email, EmailNotValidError
+from urllib.parse import urlparse
 
 from app.extensions import db
 from app.models.parent_model import Parent, ROLE_PARENT, ROLE_TEACHER, ROLE_ADMIN, VALID_ROLES
 from app.models.child_model import Child
 from app.models.book_model import Book
 from app.services.book_games import create_default_mini_games
+from app.services.cloudinary_service import upload_book_media
 
 
 def _validate_new_account_payload(data):
@@ -84,6 +86,19 @@ def create_book():
     reading_level = str(data.get("reading_level", "")).strip().lower()
     valid_levels = {"beginner", "intermediate", "advanced"}
 
+    def optional_web_url(field_name):
+        value = str(data.get(field_name, "")).strip()
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            errors.append(f"{field_name} must be a valid http or https URL.")
+            return None
+        return value
+
+    cover_image_url = optional_web_url("cover_image_url")
+    video_url = optional_web_url("video_url")
+
     if not title:
         errors.append("title is required.")
     if not age_group:
@@ -100,6 +115,8 @@ def create_book():
             reading_level=reading_level,
             text_content=str(data.get("text_content", "")).strip() or None,
             content_url=str(data.get("content_url", "")).strip() or None,
+            cover_image_url=cover_image_url,
+            video_url=video_url,
         )
         db.session.add(book)
         db.session.flush()
@@ -113,6 +130,24 @@ def create_book():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def upload_book_media_file():
+    """Admin-only upload endpoint used before a book is created."""
+    media = request.files.get("file")
+    media_type = str(request.form.get("media_type", "")).strip().lower()
+    if not media or not media.filename:
+        return jsonify({"errors": ["A media file is required."]}), 400
+    if media_type not in {"image", "video"}:
+        return jsonify({"errors": ["media_type must be image or video."]}), 400
+    try:
+        return jsonify({"url": upload_book_media(media, media_type, current_app.config)}), 201
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "The media file could not be uploaded."}), 500
 
 
 def _list_accounts_by_role(role):

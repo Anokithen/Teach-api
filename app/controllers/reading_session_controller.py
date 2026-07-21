@@ -13,6 +13,7 @@ from app.models.reading_session_model import ReadingSession
 from app.middleware import child_belongs_to_current_parent, voice_profile_belongs_to_current_parent
 from app.controllers.game_result_controller import _award_leaderboard_points
 from app.services.speech_recognition import SpeechRecognitionError, transcribe_audio
+from app.services.score_feedback import add_score_feedback
 
 
 PRONUNCIATION_POINTS = 10
@@ -129,8 +130,12 @@ def transcribe_pronunciation(session_id):
     recording = request.files.get("audio")
     if recording is None or not recording.filename:
         return jsonify({"error": "A microphone recording is required."}), 400
+    sentence_index = request.form.get("sentence_index", type=int)
+    sentences = _book_sentences(session.book.text_content if session.book else None)
+    if sentence_index is None or sentence_index < 0 or sentence_index >= len(sentences):
+        return jsonify({"error": "Choose a valid sentence before recording."}), 400
     try:
-        transcript = transcribe_audio(recording)
+        transcript = transcribe_audio(recording, expected_text=sentences[sentence_index])
         if not transcript:
             return jsonify({"error": "No words were heard. Try again a little closer to the microphone."}), 422
         return jsonify({"transcript": transcript}), 200
@@ -178,18 +183,21 @@ def check_pronunciation(session_id):
     points_awarded = PRONUNCIATION_POINTS if correct and not already_awarded else 0
 
     try:
+        accuracy = round(score * 100)
         log.append(
             {
                 "type": "pronunciation_check",
                 "sentence_index": sentence_index,
                 "transcript": transcript.strip(),
-                "accuracy": round(score * 100),
+                "accuracy": accuracy,
                 "awarded_points": points_awarded,
             }
         )
         session.progress_log = log
+        session.accuracy_score = accuracy
         if points_awarded:
             _award_leaderboard_points(session.child_id, points_awarded)
+        automatic_feedback = add_score_feedback(session, accuracy, points_awarded, already_awarded)
         db.session.commit()
         message = (
             "Great reading! 10 points have been added to the leaderboard."
@@ -201,10 +209,11 @@ def check_pronunciation(session_id):
         return jsonify(
             {
                 "correct": correct,
-                "accuracy": round(score * 100),
+                "accuracy": accuracy,
                 "points_awarded": points_awarded,
                 "already_awarded": already_awarded,
                 "message": message,
+                "feedback": automatic_feedback.to_dict(),
             }
         ), 200
     except Exception:
