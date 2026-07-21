@@ -6,7 +6,9 @@ import cloudinary.uploader
 import cloudinary.utils
 
 
-ALLOWED_EXTENSIONS = {"mp3", "wav"}
+# Browsers commonly record as WebM, OGG, or M4A rather than MP3/WAV.
+# Cloudinary stores all of these as authenticated video/audio resources.
+ALLOWED_EXTENSIONS = {"mp3", "wav", "webm", "ogg", "m4a", "mp4"}
 
 
 def configure_cloudinary(config):

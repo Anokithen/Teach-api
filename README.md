@@ -3,7 +3,7 @@
 
 ## Private voice recordings
 
-Voice-profile uploads accept MP3 and WAV files smaller than 25 MB. Install the
+Voice-profile uploads accept MP3, WAV, WebM, OGG, M4A, and MP4 files smaller than 25 MB. Install the
 updated dependencies, copy `.env.example` to `.env`, and set the Cloudinary
 cloud name, API key, and API secret on the API server. Do not place these
 values in the Next.js application.

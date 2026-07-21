@@ -2,18 +2,18 @@ from flask import current_app, jsonify, request, redirect
 from flask_jwt_extended import current_user
 
 from app.extensions import db
-from app.models.voice_profile_model import VoiceProfile, STATUS_PROCESSING
+from app.models.voice_profile_model import VoiceProfile, STATUS_READY
 from app.middleware import can_access_voice_profile
 from app.services.cloudinary_service import ALLOWED_EXTENSIONS, delete_voice_sample, signed_voice_delivery_url, upload_voice_sample
 
 
 def create_voice_profile():
-    """Accept a private MP3/WAV upload and store it in Cloudinary."""
+    """Accept a private audio upload and store it in Cloudinary."""
     sample = request.files.get("audio")
     if not sample or not sample.filename:
-        return jsonify({"errors": ["An MP3 or WAV audio file is required."]}), 400
+        return jsonify({"errors": ["A supported audio file is required."]}), 400
     if "." not in sample.filename or sample.filename.rsplit(".", 1)[1].lower() not in ALLOWED_EXTENSIONS:
-        return jsonify({"errors": ["Only .mp3 and .wav files are accepted."]}), 400
+        return jsonify({"errors": ["Only MP3, WAV, WebM, OGG, M4A, and MP4 audio files are accepted."]}), 400
 
     data = request.form
 
@@ -24,7 +24,9 @@ def create_voice_profile():
             label=str(data.get("label")).strip() if data.get("label") else None,
             voice_sample_url=voice_sample_url,
             cloudinary_public_id=public_id,
-            status=STATUS_PROCESSING,
+            # Cloudinary's upload call has completed successfully at this point,
+            # so the sample is immediately available for playback and sessions.
+            status=STATUS_READY,
         )
         db.session.add(voice_profile)
         db.session.commit()
