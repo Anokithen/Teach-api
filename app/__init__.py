@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -10,6 +11,12 @@ from app.routes import register_blueprints
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    CORS(
+        app,
+        resources={r"/api/*": {"origins": app.config["FRONTEND_ORIGINS"]}},
+        allow_headers=["Authorization", "Content-Type"],
+        methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    )
     db.init_app(app)
     jwt.init_app(app)
 
