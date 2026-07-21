@@ -12,6 +12,7 @@ from app.models.voice_profile_model import VoiceProfile
 from app.models.reading_session_model import ReadingSession
 from app.middleware import child_belongs_to_current_parent, voice_profile_belongs_to_current_parent
 from app.controllers.game_result_controller import _award_leaderboard_points
+from app.services.speech_recognition import SpeechRecognitionError, transcribe_audio
 
 
 PRONUNCIATION_POINTS = 10
@@ -116,6 +117,25 @@ def get_reading_session(session_id):
     if not _session_belongs_to_current_parent(session):
         return jsonify({"error": "Reading session not found."}), 404
     return jsonify({"reading_session": session.to_dict()}), 200
+
+
+def transcribe_pronunciation(session_id):
+    """Transcribe a microphone recording with the server's offline Python recogniser."""
+    session = db.session.get(ReadingSession, session_id)
+    if not _session_belongs_to_current_parent(session):
+        return jsonify({"error": "Reading session not found."}), 404
+    if session.completed_at:
+        return jsonify({"error": "This reading session is already complete."}), 400
+    recording = request.files.get("audio")
+    if recording is None or not recording.filename:
+        return jsonify({"error": "A microphone recording is required."}), 400
+    try:
+        transcript = transcribe_audio(recording)
+        if not transcript:
+            return jsonify({"error": "No words were heard. Try again a little closer to the microphone."}), 422
+        return jsonify({"transcript": transcript}), 200
+    except SpeechRecognitionError as err:
+        return jsonify({"error": str(err)}), 503
 
 
 def check_pronunciation(session_id):
