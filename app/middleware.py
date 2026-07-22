@@ -70,7 +70,9 @@ def can_access_child(child):
         return False
     if current_user.is_admin:
         return True
-    return child.parent_id == current_user.id
+    return child.parent_id == current_user.id or (
+        current_user.is_teacher and child.created_by_id == current_user.id
+    )
 
 
 def voice_profile_belongs_to_current_parent(voice_profile):

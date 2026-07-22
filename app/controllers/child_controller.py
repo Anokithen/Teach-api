@@ -7,6 +7,9 @@ from app.models.parent_model import Parent, ROLE_PARENT
 from app.middleware import can_access_child
 
 
+VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
+
+
 def _validate_child_payload(data, partial=False):
     errors = []
     if not data:
@@ -32,6 +35,14 @@ def _validate_child_payload(data, partial=False):
     if "reading_level" in data and data.get("reading_level") is not None:
         if str(data.get("reading_level")).strip() == "":
             errors.append("reading_level cannot be empty.")
+
+    if "gender" in data and data.get("gender") not in VALID_GENDERS:
+        errors.append("gender must be male, female, other, or prefer_not_to_say.")
+
+    if "child_pin" in data and data.get("child_pin") is not None:
+        pin = str(data.get("child_pin"))
+        if pin and (len(pin) != 6 or not pin.isdigit()):
+            errors.append("child_pin must contain exactly six digits.")
 
     return errors
 
@@ -77,10 +88,13 @@ def create_child():
             created_by_id=current_user.id,
             name=str(data.get("name")).strip(),
             age=int(data.get("age")),
+            gender=data.get("gender", "prefer_not_to_say"),
             reading_level=str(data.get("reading_level")).strip()
             if data.get("reading_level")
             else "beginner",
         )
+        if data.get("child_pin"):
+            child.set_pin(str(data["child_pin"]))
         db.session.add(child)
         db.session.commit()
         return jsonify({"message": "Child profile created successfully.", "child": child.to_dict()}), 201
@@ -141,12 +155,32 @@ def update_child(child_id):
             child.age = int(data.get("age"))
         if "reading_level" in data:
             child.reading_level = str(data.get("reading_level")).strip()
+        if "gender" in data:
+            child.gender = data["gender"]
+        if data.get("child_pin"):
+            child.set_pin(str(data["child_pin"]))
 
         db.session.commit()
         return jsonify({"message": "Child profile updated successfully.", "child": child.to_dict()}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def verify_child_pin(child_id):
+    child = db.session.get(Child, child_id)
+    if not can_access_child(child):
+        return jsonify({"error": "Child not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    pin = str(data.get("pin", ""))
+    if len(pin) != 6 or not pin.isdigit():
+        return jsonify({"errors": ["pin must contain exactly six digits."]}), 400
+    if not child.child_pin_hash:
+        return jsonify({"error": "This child does not have a profile PIN."}), 400
+    if not child.check_pin(pin):
+        return jsonify({"error": "The profile PIN is incorrect."}), 401
+    return jsonify({"message": "Profile PIN verified."}), 200
 
 
 def delete_child(child_id):

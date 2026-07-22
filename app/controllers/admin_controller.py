@@ -1,4 +1,4 @@
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 from email_validator import validate_email, EmailNotValidError
 
@@ -7,6 +7,7 @@ from app.models.parent_model import Parent, ROLE_PARENT, ROLE_TEACHER, ROLE_ADMI
 from app.models.child_model import Child
 from app.models.book_model import Book
 from app.services.book_games import create_default_mini_games
+from app.services.cloudinary_service import upload_book_media
 
 
 def _validate_new_account_payload(data):
@@ -100,6 +101,8 @@ def create_book():
             reading_level=reading_level,
             text_content=str(data.get("text_content", "")).strip() or None,
             content_url=str(data.get("content_url", "")).strip() or None,
+            cover_image_url=str(data.get("cover_image_url", "")).strip() or None,
+            video_url=str(data.get("video_url", "")).strip() or None,
         )
         db.session.add(book)
         db.session.flush()
@@ -113,6 +116,25 @@ def create_book():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def upload_media():
+    """Upload a public book cover or video for use in the catalog."""
+    file = request.files.get("file")
+    media_type = request.form.get("media_type")
+    if not file or not file.filename:
+        return jsonify({"errors": ["file is required."]}), 400
+    if media_type not in {"image", "video"}:
+        return jsonify({"errors": ["media_type must be image or video."]}), 400
+    try:
+        url = upload_book_media(file, media_type, current_user.id, current_app.config)
+        return jsonify({"url": url}), 201
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Media upload failed."}), 500
 
 
 def _list_accounts_by_role(role):

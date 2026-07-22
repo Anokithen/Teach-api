@@ -1,5 +1,6 @@
 from app.extensions import db
 from app.utils import utc_now
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 class Child(db.Model):
@@ -12,6 +13,8 @@ class Child(db.Model):
     created_by_id = db.Column(db.Integer, db.ForeignKey("parents.id"), nullable=True)
     name = db.Column(db.String(120), nullable=False)
     age = db.Column(db.Integer, nullable=False)
+    gender = db.Column(db.String(30), nullable=False, default="prefer_not_to_say")
+    child_pin_hash = db.Column(db.String(255), nullable=True)
     reading_level = db.Column(db.String(50), nullable=False, default="beginner")
     created_at = db.Column(db.DateTime, default=utc_now)
 
@@ -32,6 +35,14 @@ class Child(db.Model):
             "created_by_id": self.created_by_id,
             "name": self.name,
             "age": self.age,
+            "gender": self.gender,
+            "has_pin": bool(self.child_pin_hash),
             "reading_level": self.reading_level,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+    def set_pin(self, pin):
+        self.child_pin_hash = generate_password_hash(pin)
+
+    def check_pin(self, pin):
+        return bool(self.child_pin_hash) and check_password_hash(self.child_pin_hash, pin)
