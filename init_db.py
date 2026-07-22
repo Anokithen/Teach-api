@@ -22,12 +22,27 @@ def initialize_database(app=None):
     app = app or create_app()
     uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     parsed = urlsplit(uri)
+    config_source = app.config.get("DATABASE_CONFIG_SOURCE", "unknown")
+    logger.info(
+        "Database configuration source: %s",
+        config_source,
+    )
     logger.info(
         "Connecting to database at %s:%s (db=%s)",
         parsed.hostname,
         parsed.port,
         (parsed.path or "").lstrip("/"),
     )
+
+    # A Railway container never has a MySQL server on its own localhost.
+    # Fail with an actionable message instead of retrying a guaranteed-wrong
+    # default for 30 seconds.
+    if os.getenv("PORT") and parsed.hostname in {None, "localhost", "127.0.0.1"}:
+        raise RuntimeError(
+            "Railway database variables are missing or invalid. Add "
+            "MYSQL_URL=${{<MySQL service name>.MYSQL_URL}} to the API service "
+            "or set MYSQLHOST/MYSQLPORT/MYSQLDATABASE/MYSQLUSER/MYSQLPASSWORD."
+        )
 
     max_attempts = int(os.getenv("DB_INIT_MAX_ATTEMPTS", "10"))
     retry_delay = int(os.getenv("DB_INIT_RETRY_SECONDS", "3"))

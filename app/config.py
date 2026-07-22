@@ -48,8 +48,27 @@ def _build_database_uri():
     )
 
 
+def _database_config_source():
+    if _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL"):
+        return "MYSQL_URL/DATABASE_URL"
+    if _env_value(
+        "MYSQLHOST",
+        "MYSQLPORT",
+        "MYSQLUSER",
+        "MYSQLPASSWORD",
+        "MYSQL_ROOT_PASSWORD",
+        "MYSQLDATABASE",
+        "MYSQL_DATABASE",
+    ):
+        return "MYSQL_*"
+    if _env_value("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"):
+        return "DB_*"
+    return "defaults"
+
+
 class Config:
     SQLALCHEMY_DATABASE_URI = _build_database_uri()
+    DATABASE_CONFIG_SOURCE = _database_config_source()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         # Railway's MySQL proxy can drop idle connections.
