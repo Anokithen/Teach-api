@@ -1,6 +1,7 @@
 from flask import Blueprint
 from flask_jwt_extended import jwt_required
 from app.controllers import reading_session_controller as ctrl
+from app.controllers import feedback_controller as feedback_ctrl
 
 reading_session_bp = Blueprint("reading_session", __name__, url_prefix="/api/reading-sessions")
 
@@ -35,8 +36,13 @@ def transcribe_pronunciation(session_id):
     return ctrl.transcribe_pronunciation(session_id)
 
 
+@reading_session_bp.route("/<int:session_id>/feedback", methods=["POST"])
+@jwt_required()
+def create_feedback(session_id):
+    return feedback_ctrl.create_feedback(session_id)
+
+
 @reading_session_bp.route("/<int:session_id>/feedback", methods=["GET"])
 @jwt_required()
 def list_feedback(session_id):
-    from app.controllers import feedback_controller as feedback_ctrl
     return feedback_ctrl.list_feedback(session_id)

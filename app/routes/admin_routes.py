@@ -89,9 +89,3 @@ def register_admin():
 @admin_required
 def create_book():
     return ctrl.create_book()
-
-
-@admin_bp.route("/book-media", methods=["POST"])
-@admin_required
-def upload_book_media_file():
-    return ctrl.upload_book_media_file()

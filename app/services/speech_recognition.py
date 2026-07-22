@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -35,7 +34,7 @@ def _get_model():
     return _model
 
 
-def transcribe_audio(upload, expected_text=None):
+def transcribe_audio(upload):
     """Convert a browser recording to WAV and recognise it entirely on this server."""
     model = _get_model()
     suffix = os.path.splitext(upload.filename or "recording.webm")[1] or ".webm"
@@ -66,15 +65,7 @@ def transcribe_audio(upload, expected_text=None):
 
         from vosk import KaldiRecognizer
         with wave.open(output_path, "rb") as audio:
-            # A child is reading a known book sentence. Supplying that sentence
-            # as a small grammar makes offline recognition far more accurate
-            # than asking the compact model to guess from all English words.
-            grammar = None
-            if expected_text:
-                expected_words = re.findall(r"[a-z']+", expected_text.lower())
-                if expected_words:
-                    grammar = json.dumps([" ".join(expected_words), "[unk]"])
-            recognizer = KaldiRecognizer(model, audio.getframerate(), grammar) if grammar else KaldiRecognizer(model, audio.getframerate())
+            recognizer = KaldiRecognizer(model, audio.getframerate())
             while True:
                 chunk = audio.readframes(4000)
                 if not chunk:

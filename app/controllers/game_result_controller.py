@@ -9,7 +9,6 @@ from app.models.mini_game_model import MiniGame
 from app.models.game_result_model import GameResult
 from app.models.leaderboard_model import LeaderboardEntry
 from app.middleware import child_belongs_to_current_parent
-from app.services.reading_level import sync_child_reading_level
 
 
 def _current_week_start():
@@ -24,7 +23,6 @@ def _award_leaderboard_points(child_id, points):
         entry = LeaderboardEntry(child_id=child_id, week_start=week_start, points=0, streak_count=0)
         db.session.add(entry)
     entry.points += points
-    sync_child_reading_level(child_id)
     return entry
 
 

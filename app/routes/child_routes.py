@@ -27,12 +27,6 @@ def get_child(child_id):
     return ctrl.get_child(child_id)
 
 
-@child_bp.route("/<int:child_id>/verify-pin", methods=["POST"])
-@jwt_required()
-def verify_child_pin(child_id):
-    return ctrl.verify_child_pin(child_id)
-
-
 @child_bp.route("/<int:child_id>", methods=["PATCH"])
 @jwt_required()
 def update_child(child_id):

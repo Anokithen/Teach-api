@@ -12,9 +12,7 @@ class Child(db.Model):
     created_by_id = db.Column(db.Integer, db.ForeignKey("parents.id"), nullable=True)
     name = db.Column(db.String(120), nullable=False)
     age = db.Column(db.Integer, nullable=False)
-    gender = db.Column(db.String(30), nullable=False, default="prefer_not_to_say")
     reading_level = db.Column(db.String(50), nullable=False, default="beginner")
-    pin_hash = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now)
 
     reading_sessions = db.relationship(
@@ -34,8 +32,6 @@ class Child(db.Model):
             "created_by_id": self.created_by_id,
             "name": self.name,
             "age": self.age,
-            "gender": self.gender,
             "reading_level": self.reading_level,
-            "has_pin": bool(self.pin_hash),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

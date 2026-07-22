@@ -10,18 +10,16 @@ STOP_WORDS = {
     "is", "it", "of", "on", "or", "the", "this", "that", "to", "was", "with",
 }
 
-MAX_BOOK_WORDS = 10
-
 
 def _keywords(book):
-    """Return up to ten unique, child-friendly words from a book."""
+    """Return a small, predictable set of child-friendly words from a book."""
     source = f"{book.title} {book.text_content or ''}"
     words = re.findall(r"[A-Za-z]{3,}", source.lower())
     selected = []
     for word in words:
         if word not in STOP_WORDS and word not in selected:
             selected.append(word)
-        if len(selected) == MAX_BOOK_WORDS:
+        if len(selected) == 4:
             break
     return selected or ["story", "book", "read"]
 
@@ -52,7 +50,7 @@ def create_default_mini_games(book):
     }
     games = []
     defaults = [
-        ("word_puzzle", "hard", {"time_limit_seconds": 60}, {"words": words}),
+        ("word_puzzle", "easy", {"time_limit_seconds": 60}, {"words": words}),
         ("spelling", "medium", {"lives": 3}, {"words": words}),
         (
             "quiz",

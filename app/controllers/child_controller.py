@@ -1,14 +1,10 @@
 from flask import jsonify, request
 from flask_jwt_extended import current_user
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
 from app.models.child_model import Child
 from app.models.parent_model import Parent, ROLE_PARENT
 from app.middleware import can_access_child
-from app.services.reading_level import sync_child_reading_level
-
-VALID_GENDERS = ("male", "female", "other", "prefer_not_to_say")
 
 
 def _validate_child_payload(data, partial=False):
@@ -36,18 +32,6 @@ def _validate_child_payload(data, partial=False):
     if "reading_level" in data and data.get("reading_level") is not None:
         if str(data.get("reading_level")).strip() == "":
             errors.append("reading_level cannot be empty.")
-        elif partial:
-            errors.append("reading_level is calculated automatically from earned points.")
-
-    if "gender" in data and data.get("gender") not in VALID_GENDERS:
-        errors.append("gender must be male, female, other, or prefer_not_to_say.")
-
-    if "child_pin" in data and data.get("child_pin") not in (None, ""):
-        pin = str(data.get("child_pin"))
-        if not pin.isdigit() or len(pin) != 6:
-            errors.append("child_pin must be exactly 6 digits.")
-        elif current_user.role != ROLE_PARENT:
-            errors.append("Only the child's parent can set a profile PIN.")
 
     return errors
 
@@ -93,9 +77,9 @@ def create_child():
             created_by_id=current_user.id,
             name=str(data.get("name")).strip(),
             age=int(data.get("age")),
-            gender=data.get("gender", "prefer_not_to_say"),
-            reading_level="beginner",
-            pin_hash=generate_password_hash(str(data["child_pin"])) if data.get("child_pin") else None,
+            reading_level=str(data.get("reading_level")).strip()
+            if data.get("reading_level")
+            else "beginner",
         )
         db.session.add(child)
         db.session.commit()
@@ -123,12 +107,6 @@ def list_children():
     else:
         children = Child.query.filter_by(parent_id=current_user.id).order_by(Child.id.desc()).all()
 
-    level_changed = False
-    for child in children:
-        _, _, changed = sync_child_reading_level(child.id)
-        level_changed = level_changed or changed
-    if level_changed:
-        db.session.commit()
     return jsonify({"children": [c.to_dict() for c in children]}), 200
 
 
@@ -136,9 +114,6 @@ def get_child(child_id):
     child = db.session.get(Child, child_id)
     if not can_access_child(child):
         return jsonify({"error": "Child not found."}), 404
-
-    if sync_child_reading_level(child.id)[2]:
-        db.session.commit()
 
     stats = {
         "total_sessions": len(child.reading_sessions),
@@ -164,29 +139,14 @@ def update_child(child_id):
             child.name = str(data.get("name")).strip()
         if "age" in data:
             child.age = int(data.get("age"))
-        # Reading level is calculated from lifetime points and cannot be set manually.
-        if data.get("child_pin"):
-            child.pin_hash = generate_password_hash(str(data["child_pin"]))
+        if "reading_level" in data:
+            child.reading_level = str(data.get("reading_level")).strip()
 
         db.session.commit()
         return jsonify({"message": "Child profile updated successfully.", "child": child.to_dict()}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
-
-
-def verify_child_pin(child_id):
-    """Verify the six-digit PIN before opening a protected child profile."""
-    child = db.session.get(Child, child_id)
-    if not can_access_child(child):
-        return jsonify({"error": "Child not found."}), 404
-
-    data = request.get_json(silent=True) or {}
-    pin = str(data.get("pin", ""))
-    if not child.pin_hash or not pin.isdigit() or len(pin) != 6 or not check_password_hash(child.pin_hash, pin):
-        return jsonify({"error": "That PIN is not correct."}), 401
-
-    return jsonify({"message": "PIN verified."}), 200
 
 
 def delete_child(child_id):
