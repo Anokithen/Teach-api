@@ -1,4 +1,4 @@
-"""XTTS-v2 synthesis helpers for cached private book narrations."""
+"""Coqui TTS/voice-conversion helpers for cached private book narrations."""
 import os
 import re
 import shutil
@@ -12,7 +12,7 @@ import requests
 
 
 class TTSError(Exception):
-    """An XTTS setup, download, or inference error safe to show to API users."""
+    """A Coqui TTS setup, download, or inference error safe to show to API users."""
 
 
 def split_text_into_chunks(text, max_chars=280):
@@ -107,9 +107,9 @@ def _load_model(model_name, device, cache_dir):
         model = TTS(model_name=model_name, progress_bar=False)
         return model.to(device) if device else model
     except ImportError as exc:
-        raise TTSError("XTTS is not installed. Install the API requirements and redeploy.") from exc
+        raise TTSError("Coqui TTS is not installed. Install the API requirements and redeploy.") from exc
     except Exception as exc:
-        raise TTSError("XTTS-v2 model files could not be loaded. Check XTTS model settings and server storage.") from exc
+        raise TTSError("Coqui model files could not be loaded. Check TTS model settings and server storage.") from exc
 
 
 def _combine_wav_files(paths, destination):
@@ -130,9 +130,33 @@ def _combine_wav_files(paths, destination):
         raise TTSError("XTTS generated audio that could not be combined.") from exc
 
 
+def _synthesize_chunk(model, chunk, reference_wav, chunk_path, config):
+    """Synthesize one chunk with native cloning or Coqui's VC helper."""
+    method = str(config.get("TTS_VOICE_CLONING_METHOD", "native")).lower()
+    if method == "vc":
+        # This is Coqui's equivalent of:
+        # tts.tts_with_vc_to_file(text, speaker_wav="speaker.wav", file_path="output.wav")
+        # It lets a standard TTS model speak first, then converts it to the
+        # uploaded Cloudinary reference voice.
+        model.tts_with_vc_to_file(
+            text=chunk,
+            speaker_wav=str(reference_wav),
+            file_path=str(chunk_path),
+        )
+        return
+    if method != "native":
+        raise TTSError("TTS_VOICE_CLONING_METHOD must be either 'native' or 'vc'.")
+    model.tts_to_file(
+        text=chunk,
+        speaker_wav=str(reference_wav),
+        language=config.get("TTS_LANGUAGE", "en"),
+        file_path=str(chunk_path),
+    )
+
+
 def synthesize_narration(text, reference_voice_url, output_path, config):
-    """Generate a WAV narration from book text and a signed reference-audio URL."""
-    chunks = split_text_into_chunks(text, int(config.get("XTTS_MAX_CHARS_PER_CHUNK", 280)))
+    """Generate a WAV narration using a signed Cloudinary reference-audio URL."""
+    chunks = split_text_into_chunks(text, int(config.get("TTS_MAX_CHARS_PER_CHUNK", 280)))
     if not chunks:
         raise TTSError("This book has no text available for narration.")
 
@@ -143,23 +167,18 @@ def synthesize_narration(text, reference_voice_url, output_path, config):
         _download_reference_voice(reference_voice_url, downloaded_voice)
         _to_wav(downloaded_voice, reference_wav)
         model = _load_model(
-            config.get("XTTS_MODEL_NAME"),
-            config.get("XTTS_DEVICE", "cpu"),
-            config.get("XTTS_CACHE_DIR"),
+            config.get("TTS_MODEL_NAME"),
+            config.get("TTS_DEVICE", "cpu"),
+            config.get("TTS_CACHE_DIR"),
         )
         chunk_paths = []
         try:
             for index, chunk in enumerate(chunks):
                 chunk_path = temp_path / f"chunk-{index}.wav"
-                model.tts_to_file(
-                    text=chunk,
-                    speaker_wav=str(reference_wav),
-                    language=config.get("XTTS_LANGUAGE", "en"),
-                    file_path=str(chunk_path),
-                )
+                _synthesize_chunk(model, chunk, reference_wav, chunk_path, config)
                 chunk_paths.append(chunk_path)
             _combine_wav_files(chunk_paths, output_path)
         except TTSError:
             raise
         except Exception as exc:
-            raise TTSError("XTTS-v2 could not generate this narration. Try a clearer voice sample or shorter book.") from exc
+            raise TTSError("Coqui could not generate this narration. Try a clearer voice sample, compatible model, or shorter book.") from exc

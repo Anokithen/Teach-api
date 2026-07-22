@@ -1,6 +1,7 @@
 """Async, cached narration generation. It is deliberately separate from reading sessions."""
 import os
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import current_app, jsonify, redirect, request
@@ -19,6 +20,11 @@ from app.services.tts_service import TTSError, synthesize_narration
 # Simple deployment-sized queue. Replace with Celery/RQ before running multiple
 # replicas or requiring durable jobs; in-process jobs are lost on restart.
 NARRATION_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="book-narration")
+# The database row is durable, but the worker is intentionally in-process for
+# this deployment. Keep the future so we can tell a live job from one orphaned
+# by a web-process restart.
+NARRATION_FUTURES = {}
+NARRATION_FUTURES_LOCK = threading.RLock()
 
 
 def _generate_narration(app, narration_id):
@@ -67,7 +73,26 @@ def _generate_narration(app, narration_id):
 
 def _enqueue_narration(narration_id):
     app = current_app._get_current_object()
-    NARRATION_EXECUTOR.submit(_generate_narration, app, narration_id)
+    with NARRATION_FUTURES_LOCK:
+        existing = NARRATION_FUTURES.get(narration_id)
+        if existing is not None and not existing.done():
+            return False
+        future = NARRATION_EXECUTOR.submit(_generate_narration, app, narration_id)
+        NARRATION_FUTURES[narration_id] = future
+
+        def forget_finished(done_future):
+            with NARRATION_FUTURES_LOCK:
+                if NARRATION_FUTURES.get(narration_id) is done_future:
+                    NARRATION_FUTURES.pop(narration_id, None)
+
+        future.add_done_callback(forget_finished)
+        return True
+
+
+def _narration_worker_is_live(narration_id):
+    with NARRATION_FUTURES_LOCK:
+        future = NARRATION_FUTURES.get(narration_id)
+        return future is not None and not future.done()
 
 
 def create_book_narration(book_id):
@@ -93,6 +118,10 @@ def create_book_narration(book_id):
             existing.error_message = None
             db.session.commit()
             _enqueue_narration(existing.id)
+            return jsonify({"message": "Narration generation restarted.", "book_narration": existing.to_dict(), "existing": True}), 202
+        if existing.status == STATUS_PROCESSING and _enqueue_narration(existing.id):
+            # A processing row with no live future is an orphan left by a
+            # restart. Re-queue it so the UI cannot remain stuck indefinitely.
             return jsonify({"message": "Narration generation restarted.", "book_narration": existing.to_dict(), "existing": True}), 202
         return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
     try:
@@ -125,6 +154,10 @@ def get_book_narration_status(narration_id):
     narration = db.session.get(BookNarration, narration_id)
     if not can_access_book_narration(narration):
         return jsonify({"error": "Book narration not found."}), 404
+    if narration.status == STATUS_PROCESSING and not _narration_worker_is_live(narration.id):
+        # Status polling is also a recovery path after a gunicorn/Railway
+        # restart, when the in-memory executor and its future are lost.
+        _enqueue_narration(narration.id)
     return jsonify(narration.to_dict()), 200
 
 
