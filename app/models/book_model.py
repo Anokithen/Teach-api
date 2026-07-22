@@ -19,6 +19,9 @@ class Book(db.Model):
         "MiniGame", backref="book", cascade="all, delete-orphan", lazy=True
     )
     reading_sessions = db.relationship("ReadingSession", backref="book", lazy=True)
+    narrations = db.relationship(
+        "BookNarration", backref="book", cascade="all, delete-orphan", lazy=True
+    )
 
     def to_dict(self, include_content=False):
         data = {

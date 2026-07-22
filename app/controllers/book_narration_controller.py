@@ -1,0 +1,142 @@
+"""Async, cached narration generation. It is deliberately separate from reading sessions."""
+import os
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
+
+from flask import current_app, jsonify, redirect, request
+from flask_jwt_extended import current_user
+from sqlalchemy.exc import IntegrityError
+
+from app.extensions import db
+from app.middleware import can_access_book_narration, voice_profile_belongs_to_current_parent
+from app.models.book_model import Book
+from app.models.book_narration_model import BookNarration, STATUS_FAILED, STATUS_PROCESSING, STATUS_READY
+from app.models.voice_profile_model import STATUS_READY as VOICE_STATUS_READY, VoiceProfile
+from app.services.cloudinary_service import signed_narration_delivery_url, signed_voice_delivery_url, upload_book_narration
+from app.services.tts_service import TTSError, synthesize_narration
+
+
+# Simple deployment-sized queue. Replace with Celery/RQ before running multiple
+# replicas or requiring durable jobs; in-process jobs are lost on restart.
+NARRATION_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="book-narration")
+
+
+def _generate_narration(app, narration_id):
+    """Worker entry point; always creates its own Flask app context/session."""
+    output_path = None
+    with app.app_context():
+        try:
+            narration = db.session.get(BookNarration, narration_id)
+            if not narration or narration.status != STATUS_PROCESSING:
+                return
+            book, profile = narration.book, narration.voice_profile
+            if not book or not profile or not book.text_content:
+                raise TTSError("The book text or voice profile is no longer available.")
+            reference_url = signed_voice_delivery_url(
+                profile.cloudinary_public_id, profile.voice_sample_url, app.config
+            )
+            with tempfile.NamedTemporaryFile(prefix="teachalike-narration-", suffix=".wav", delete=False) as output:
+                output_path = output.name
+            synthesize_narration(book.text_content, reference_url, output_path, app.config)
+            with open(output_path, "rb") as audio_file:
+                audio_url, public_id = upload_book_narration(audio_file, profile.parent_id, app.config)
+            narration.narration_audio_url = audio_url
+            narration.cloudinary_public_id = public_id
+            narration.error_message = None
+            narration.status = STATUS_READY
+            db.session.commit()
+        except TTSError as exc:
+            db.session.rollback()
+            narration = db.session.get(BookNarration, narration_id)
+            if narration:
+                narration.status = STATUS_FAILED
+                narration.error_message = str(exc)[:500]
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+            narration = db.session.get(BookNarration, narration_id)
+            if narration:
+                narration.status = STATUS_FAILED
+                narration.error_message = "Narration generation failed. Please try again later."
+                db.session.commit()
+        finally:
+            if output_path and os.path.exists(output_path):
+                os.remove(output_path)
+            db.session.remove()
+
+
+def _enqueue_narration(narration_id):
+    app = current_app._get_current_object()
+    NARRATION_EXECUTOR.submit(_generate_narration, app, narration_id)
+
+
+def create_book_narration(book_id):
+    book = db.session.get(Book, book_id)
+    if not book:
+        return jsonify({"error": "Book not found."}), 404
+    data = request.get_json(silent=True) or {}
+    voice_profile_id = data.get("voice_profile_id")
+    profile = db.session.get(VoiceProfile, voice_profile_id) if voice_profile_id else None
+    if not (voice_profile_belongs_to_current_parent(profile) or current_user.is_admin):
+        return jsonify({"errors": ["voice_profile_id must reference a voice profile owned by this account."]}), 400
+    if profile.status != VOICE_STATUS_READY:
+        return jsonify({"errors": ["The selected voice profile is not ready yet."]}), 400
+    if not (book.text_content or "").strip():
+        return jsonify({"errors": ["This book has no text available for narration."]}), 400
+
+    existing = BookNarration.query.filter_by(book_id=book.id, voice_profile_id=profile.id).first()
+    if existing:
+        # Preserve the unique cache row, but allow a failed transient/configuration
+        # job to be retried after the server has been corrected.
+        if existing.status == STATUS_FAILED:
+            existing.status = STATUS_PROCESSING
+            existing.error_message = None
+            db.session.commit()
+            _enqueue_narration(existing.id)
+            return jsonify({"message": "Narration generation restarted.", "book_narration": existing.to_dict(), "existing": True}), 202
+        return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
+    try:
+        narration = BookNarration(book_id=book.id, voice_profile_id=profile.id, status=STATUS_PROCESSING)
+        db.session.add(narration)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        narration = BookNarration.query.filter_by(book_id=book.id, voice_profile_id=profile.id).first()
+        return jsonify({"book_narration": narration.to_dict(), "existing": True}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+    _enqueue_narration(narration.id)
+    return jsonify({"message": "Narration generation started.", "book_narration": narration.to_dict()}), 201
+
+
+def list_book_narrations(book_id):
+    if not db.session.get(Book, book_id):
+        return jsonify({"error": "Book not found."}), 404
+    query = BookNarration.query.filter_by(book_id=book_id)
+    if not current_user.is_admin:
+        query = query.join(VoiceProfile).filter(VoiceProfile.parent_id == current_user.id)
+    narrations = query.order_by(BookNarration.id.desc()).all()
+    return jsonify({"book_narrations": [narration.to_dict() for narration in narrations]}), 200
+
+
+def get_book_narration_status(narration_id):
+    narration = db.session.get(BookNarration, narration_id)
+    if not can_access_book_narration(narration):
+        return jsonify({"error": "Book narration not found."}), 404
+    return jsonify(narration.to_dict()), 200
+
+
+def get_book_narration_audio(narration_id):
+    narration = db.session.get(BookNarration, narration_id)
+    if not can_access_book_narration(narration):
+        return jsonify({"error": "Book narration not found."}), 404
+    if narration.status != STATUS_READY or not narration.narration_audio_url:
+        return jsonify({"error": "This narration is not ready yet."}), 409
+    try:
+        return redirect(signed_narration_delivery_url(
+            narration.cloudinary_public_id, narration.narration_audio_url, current_app.config
+        ))
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503

@@ -7,6 +7,7 @@ from app.models.feedback_model import Feedback
 from app.models.mini_game_model import MiniGame
 from app.models.game_result_model import GameResult
 from app.models.leaderboard_model import LeaderboardEntry
+from app.models.book_narration_model import BookNarration
 
 __all__ = [
     "Parent",
@@ -18,4 +19,5 @@ __all__ = [
     "MiniGame",
     "GameResult",
     "LeaderboardEntry",
+    "BookNarration",
 ]

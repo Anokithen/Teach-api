@@ -22,6 +22,9 @@ class VoiceProfile(db.Model):
     reading_sessions = db.relationship(
         "ReadingSession", backref="voice_profile", lazy=True
     )
+    narrations = db.relationship(
+        "BookNarration", backref="voice_profile", cascade="all, delete-orphan", lazy=True
+    )
 
     def to_dict(self):
         return {

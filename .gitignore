@@ -5,3 +5,6 @@ instance/
 .venv/
 venv/
 models/
+# Python source models remain versioned; only downloaded ML model weights are ignored.
+!app/models/
+!app/models/*.py

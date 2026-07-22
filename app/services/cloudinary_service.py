@@ -41,6 +41,26 @@ def upload_voice_sample(file, owner_id, config):
     return result["secure_url"], result["public_id"]
 
 
+def upload_book_narration(file, owner_id, config):
+    """Store generated narration as private authenticated Cloudinary audio."""
+    configure_cloudinary(config)
+    public_id = f"book_narrations/{owner_id}/{uuid4().hex}"
+    result = cloudinary.uploader.upload(
+        file,
+        resource_type="video",
+        type="authenticated",
+        public_id=public_id,
+        format="wav",
+        overwrite=False,
+    )
+    return result["secure_url"], result["public_id"]
+
+
+def signed_narration_delivery_url(public_id, fallback_url, config):
+    """Narrations use the same authenticated delivery policy as voice samples."""
+    return signed_voice_delivery_url(public_id, fallback_url, config)
+
+
 def delete_voice_sample(public_id, config):
     if not public_id:
         return

@@ -89,3 +89,13 @@ def can_access_voice_profile(voice_profile):
         and current_user is not None
         and (current_user.is_admin or voice_profile.parent_id == current_user.id)
     )
+
+
+def can_access_book_narration(narration):
+    """Narrations inherit access from the private voice profile they use."""
+    return (
+        narration is not None
+        and narration.voice_profile is not None
+        and current_user is not None
+        and (current_user.is_admin or narration.voice_profile.parent_id == current_user.id)
+    )

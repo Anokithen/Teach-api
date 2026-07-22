@@ -37,4 +37,15 @@ class Config:
         "VOSK_MODEL_PATH",
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vosk-model-small-en-us-0.15"),
     )
+    # XTTS downloads model weights here on first use. Mount persistent storage in
+    # production so a redeploy does not download the multi-GB model again.
+    XTTS_MODEL_NAME = os.getenv(
+        "XTTS_MODEL_NAME", "tts_models/multilingual/multi-dataset/xtts_v2"
+    )
+    XTTS_DEVICE = os.getenv("XTTS_DEVICE", "cpu")
+    XTTS_CACHE_DIR = os.getenv(
+        "XTTS_CACHE_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "xtts")
+    )
+    XTTS_LANGUAGE = os.getenv("XTTS_LANGUAGE", "en")
+    XTTS_MAX_CHARS_PER_CHUNK = int(os.getenv("XTTS_MAX_CHARS_PER_CHUNK", "280"))
     MAX_CONTENT_LENGTH = 25 * 1024 * 1024
