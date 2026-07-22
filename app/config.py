@@ -7,31 +7,49 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-class Config:
-    # Prefer Railway's connection URL, then its individual MYSQL_* variables,
-    # and finally the DB_* names used by local development. This is the same
-    # resolution flow as the working InventoryHub API.
-    DATABASE_URL = (
-        os.getenv("MYSQL_URL")
-        or os.getenv("MYSQL_PUBLIC_URL")
-        or os.getenv("DATABASE_URL")
-    )
-    DB_USER = os.getenv("MYSQLUSER") or os.getenv("DB_USER", "root")
-    DB_PASSWORD = os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD", "root123")
-    DB_HOST = os.getenv("MYSQLHOST") or os.getenv("DB_HOST", "localhost")
-    DB_NAME = os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME", "teachalike_db")
-    DB_PORT = os.getenv("MYSQLPORT") or os.getenv("DB_PORT", "3306")
+def _env_value(*names, default=""):
+    """Read the first usable environment value and strip accidental quotes."""
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1].strip()
+        # Railway leaves an unresolved ${{...}} reference as literal text if
+        # a service reference is configured on the wrong service.
+        if value and "${{" not in value and "}}" not in value:
+            return value
+    return default
 
-    if DATABASE_URL:
-        # SQLAlchemy's MySQL dialect needs the PyMySQL driver explicitly.
-        SQLALCHEMY_DATABASE_URI = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
-    else:
-        # Quote credentials and the database name so values containing
-        # punctuation do not produce an invalid connection URL.
-        SQLALCHEMY_DATABASE_URI = (
-            f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}"
-            f"@{DB_HOST}:{DB_PORT}/{quote_plus(DB_NAME)}"
-        )
+
+def _build_database_uri():
+    # Prefer Railway's ready-made private URL for services in the same
+    # project. The public URL remains supported for external/local access.
+    railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
+    if railway_url:
+        return railway_url.replace("mysql://", "mysql+pymysql://", 1)
+
+    # Also support the exact variable names exposed by Railway's MySQL
+    # service, plus the DB_* names used by local development.
+    db_user = _env_value("MYSQLUSER", "DB_USER", default="root")
+    db_password = _env_value(
+        "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD", "DB_PASSWORD", default="root123"
+    )
+    db_host = _env_value("MYSQLHOST", "DB_HOST", default="localhost")
+    db_port = _env_value("MYSQLPORT", "DB_PORT", default="3306")
+    db_name = _env_value(
+        "MYSQLDATABASE", "MYSQL_DATABASE", "DB_NAME", default="teachalike_db"
+    )
+
+    return (
+        f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}"
+        f"@{db_host}:{db_port}/{quote_plus(db_name)}"
+    )
+
+
+class Config:
+    SQLALCHEMY_DATABASE_URI = _build_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         # Railway's MySQL proxy can drop idle connections.
@@ -51,9 +69,13 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))
     )
+    _frontend_origins = _env_value("FRONTEND_ORIGINS")
+    # The frontend uses bearer tokens in the Authorization header, not
+    # cookies. A wildcard keeps a newly deployed frontend usable until its
+    # exact Vercel/custom origin is configured in Railway.
     FRONTEND_ORIGINS = [
         origin.strip()
-        for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000").split(",")
+        for origin in (_frontend_origins or "*").split(",")
         if origin.strip()
     ]
     # Voice recordings are sent to Cloudinary through the API, never from the

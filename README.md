@@ -24,17 +24,26 @@ during the image build.
 Set `JWT_SECRET_KEY`, `FRONTEND_ORIGINS`, and the Cloudinary variables in
 Railway. A Railway MySQL service can be connected by referencing its native
 `MYSQL_URL` (or its `MYSQL*` variables); the API also accepts the existing
-`DB_*` variables. The `/api/health` endpoint does not require the database, so
-Railway can complete its health check while the database is starting.
+`DB_*` variables. The startup initializer waits for MySQL and creates the
+tables before Gunicorn begins serving traffic.
+
+Important: MySQL service variables are not automatically visible to another
+Railway service. On the API service, add `MYSQL_URL` with a Railway service
+reference such as `${{MySQL.MYSQL_URL}}`, or add references for each `MYSQL*`
+variable. The reference must resolve to a value; literal `${{...}}` text means
+the variable was configured on the wrong service.
+
+Use `/api/health` to check the web process and `/api/health/db` to check the
+MySQL connection.
 
 The service uses Gunicorn's one-worker default because each worker can load a
 separate copy of the optional TTS model. Increase workers only by changing the
 start command when the Railway service has enough memory.
 
-At startup, the API logs the database host/port, retries the MySQL connection,
-and creates any missing model tables. If MySQL is temporarily unavailable,
-the web process remains alive so `/api/health` can still pass; database-backed
-requests return a database error until connectivity is restored.
+Before Gunicorn starts, the API logs the database host/port, retries the
+MySQL connection, and creates any missing model tables. Gunicorn starts only
+after the schema is ready, so a failed deployment points directly to the
+database configuration instead of serving an API that cannot persist data.
 
 To load the optional demo data after deployment:
 
