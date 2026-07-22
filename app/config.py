@@ -77,13 +77,10 @@ class Config:
         "connect_args": {"connect_timeout": 5},
     }
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-key-change-me")
+    # Flask-JWT-Extended reads JWT_ACCESS_TOKEN_EXPIRES. JWT_TIMEOUT is kept
+    # as the environment variable for compatibility with existing deployments.
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        minutes=int(
-            os.getenv(
-                "JWT_ACCESS_TOKEN_EXPIRES_MINUTES",
-                os.getenv("JWT_TIMEOUT", "15"),
-            )
-        )
+        days=int(os.getenv("JWT_TIMEOUT", "15"))
     )
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))
