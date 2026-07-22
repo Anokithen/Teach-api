@@ -8,31 +8,45 @@ load_dotenv()
 
 
 class Config:
-    # Railway's MySQL plugin exposes MYSQL_* variables (and, depending on
-    # the service setup, MYSQL_URL). Keep the DB_* names for local/custom
-    # deployments, and allow a standard DATABASE_URL as a final option.
-    DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("MYSQL_URL")
-    DB_USER = os.getenv("DB_USER") or os.getenv("MYSQLUSER", "root")
-    DB_PASSWORD = os.getenv("DB_PASSWORD") or os.getenv("MYSQLPASSWORD", "")
-    DB_HOST = os.getenv("DB_HOST") or os.getenv("MYSQLHOST", "localhost")
-    DB_NAME = os.getenv("DB_NAME") or os.getenv("MYSQLDATABASE", "teachalike_db")
-    DB_PORT = os.getenv("DB_PORT") or os.getenv("MYSQLPORT", "3306")
+    # Prefer Railway's connection URL, then its individual MYSQL_* variables,
+    # and finally the DB_* names used by local development. This is the same
+    # resolution flow as the working InventoryHub API.
+    DATABASE_URL = (
+        os.getenv("MYSQL_URL")
+        or os.getenv("MYSQL_PUBLIC_URL")
+        or os.getenv("DATABASE_URL")
+    )
+    DB_USER = os.getenv("MYSQLUSER") or os.getenv("DB_USER", "root")
+    DB_PASSWORD = os.getenv("MYSQLPASSWORD") or os.getenv("DB_PASSWORD", "root123")
+    DB_HOST = os.getenv("MYSQLHOST") or os.getenv("DB_HOST", "localhost")
+    DB_NAME = os.getenv("MYSQLDATABASE") or os.getenv("DB_NAME", "teachalike_db")
+    DB_PORT = os.getenv("MYSQLPORT") or os.getenv("DB_PORT", "3306")
 
     if DATABASE_URL:
         # SQLAlchemy's MySQL dialect needs the PyMySQL driver explicitly.
         SQLALCHEMY_DATABASE_URI = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
     else:
-        # Quote credentials and the database name so Railway-generated values
-        # containing punctuation do not produce an invalid connection URL.
+        # Quote credentials and the database name so values containing
+        # punctuation do not produce an invalid connection URL.
         SQLALCHEMY_DATABASE_URI = (
             f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASSWORD)}"
             f"@{DB_HOST}:{DB_PORT}/{quote_plus(DB_NAME)}"
         )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        # Railway's MySQL proxy can drop idle connections.
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+        "connect_args": {"connect_timeout": 5},
+    }
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-key-change-me")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_MINUTES", "15"))
+        minutes=int(
+            os.getenv(
+                "JWT_ACCESS_TOKEN_EXPIRES_MINUTES",
+                os.getenv("JWT_TIMEOUT", "15"),
+            )
+        )
     )
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))

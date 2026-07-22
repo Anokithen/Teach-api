@@ -27,11 +27,16 @@ Railway. A Railway MySQL service can be connected by referencing its native
 `DB_*` variables. The `/api/health` endpoint does not require the database, so
 Railway can complete its health check while the database is starting.
 
-The service defaults to one Gunicorn worker because each worker can load a
-separate copy of the optional TTS model. Set `WEB_CONCURRENCY` higher only if
-the Railway service has enough memory.
+The service uses Gunicorn's one-worker default because each worker can load a
+separate copy of the optional TTS model. Increase workers only by changing the
+start command when the Railway service has enough memory.
 
-Create the database tables once after the database is available:
+At startup, the API logs the database host/port, retries the MySQL connection,
+and creates any missing model tables. If MySQL is temporarily unavailable,
+the web process remains alive so `/api/health` can still pass; database-backed
+requests return a database error until connectivity is restored.
+
+To load the optional demo data after deployment:
 
 ```bash
 python seed.py
@@ -40,9 +45,9 @@ python seed.py
 Run this command from a Railway service shell after the MySQL service is
 available, or run it locally with the Railway database variables loaded.
 
-`seed.py` calls `db.create_all()` before inserting its sample data. For a
-production database, apply the SQL files in `migrations/` after the initial
-table creation.
+`seed.py` inserts sample data and is not required for the API to start. For a
+production database, review the SQL files in `migrations/` before applying
+schema changes.
 
 The browser records audio, uploads it to the authenticated `/api/reading-sessions/:id/pronunciation-transcript` endpoint, and then sends the returned transcript to the existing pronunciation scoring endpoint. Recordings are deleted from the server immediately after transcription.
 

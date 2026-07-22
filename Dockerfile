@@ -25,4 +25,4 @@ RUN mkdir -p /app/models \
 
 COPY . .
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WEB_CONCURRENCY:-1} --threads 4 --timeout 120 run:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --threads 4 --timeout 120 run:app"]
