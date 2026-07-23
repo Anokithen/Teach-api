@@ -22,34 +22,42 @@ def _env_value(*names, default=""):
     return default
 
 
-# def _build_database_uri():
+def _build_database_uri():
+    """Build the SQLAlchemy MySQL URI from whatever Railway (or local .env)
+    variables are actually available.
 
-#     railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
-#     if railway_url:
-#         scheme, separator, remainder = railway_url.partition("://")
-#         if not separator or scheme.lower() not in {"mysql", "mysql+pymysql"}:
-#             raise ValueError(
-#                 "Only MySQL connection URLs are supported. Configure MYSQL_URL "
-#                 "or a mysql:// DATABASE_URL."
-#             )
-      
-#         return f"mysql+pymysql://{remainder}"
+    Priority:
+    1. A full connection URL: MYSQL_URL / MYSQL_PUBLIC_URL / DATABASE_URL.
+       Railway's MySQL plugin exposes ``MYSQL_URL`` as a service reference,
+       e.g. ``MYSQL_URL=${{MySQL.MYSQL_URL}}`` on the API service.
+    2. Railway's individual MYSQL* variables (MYSQLHOST, MYSQLPORT, ...).
+    3. The generic DB_* variables (used for local development).
+    """
 
-  
-#     db_user = _env_value("MYSQLUSER", "DB_USER", default="root")
-#     db_password = _env_value(
-#         "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD", "DB_PASSWORD", default="root123"
-#     )
-#     db_host = _env_value("MYSQLHOST", "DB_HOST", default="localhost")
-#     db_port = _env_value("MYSQLPORT", "DB_PORT", default="3306")
-#     db_name = _env_value(
-#         "MYSQLDATABASE", "MYSQL_DATABASE", "DB_NAME", default="teachalike_db"
-#     )
+    railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
+    if railway_url:
+        scheme, separator, remainder = railway_url.partition("://")
+        if not separator or scheme.lower() not in {"mysql", "mysql+pymysql"}:
+            raise ValueError(
+                "Only MySQL connection URLs are supported. Configure MYSQL_URL "
+                "or a mysql:// DATABASE_URL."
+            )
+        return f"mysql+pymysql://{remainder}"
 
-    # return (
-    #     f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}"
-    #     f"@{db_host}:{db_port}/{quote_plus(db_name)}"
-    # )
+    db_user = _env_value("MYSQLUSER", "DB_USER", default="root")
+    db_password = _env_value(
+        "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD", "DB_PASSWORD", default="root123"
+    )
+    db_host = _env_value("MYSQLHOST", "DB_HOST", default="localhost")
+    db_port = _env_value("MYSQLPORT", "DB_PORT", default="3306")
+    db_name = _env_value(
+        "MYSQLDATABASE", "MYSQL_DATABASE", "DB_NAME", default="teachalike_db"
+    )
+
+    return (
+        f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}"
+        f"@{db_host}:{db_port}/{quote_plus(db_name)}"
+    )
 
 
 class Config:
@@ -59,13 +67,7 @@ class Config:
     DB_NAME = os.getenv("DB_NAME")
     DB_PORT = os.getenv("DB_PORT")
 
-    SQLALCHEMY_DATABASE_URI = (
-        f"mysql+mysql://root:qCpRmgOhJHwjgxHanpSOMcxlAtebuizJ@sakura.proxy.rlwy.net:43285/railway"
-    )
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-
-
+    SQLALCHEMY_DATABASE_URI = _build_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
 

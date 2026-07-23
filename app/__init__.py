@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -20,7 +22,15 @@ def create_app():
     db.init_app(app)
     jwt.init_app(app)
 
-    from app.models import Parent
+    from app.models import Parent  # noqa: F401  (this import loads app/models/__init__.py,
+    # which in turn imports every model class so they register with SQLAlchemy)
+
+    if os.getenv("AUTO_CREATE_TABLES", "true").lower() == "true":
+        with app.app_context():
+            try:
+                db.create_all()
+            except Exception as exc:  # pragma: no cover - startup diagnostics only
+                app.logger.error("Could not create database tables: %s", exc)
 
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_data):
