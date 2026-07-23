@@ -15,7 +15,7 @@ from app.models.game_result_model import GameResult
 from app.models.mini_game_model import MiniGame
 from app.middleware import child_belongs_to_current_parent
 from app.middleware import voice_profile_belongs_to_current_parent
-from app.controllers.game_result_controller import _award_leaderboard_points
+from app.controllers.game_result_controller import _award_leaderboard_points, _maximum_game_score
 
 
 def _parse_sync_datetime(value, field_name):
@@ -223,6 +223,10 @@ def sync_offline_activity():
                 continue
             if score < 0:
                 errors.append("game_result entry: score cannot be negative.")
+                continue
+            maximum_score = _maximum_game_score(game)
+            if maximum_score is not None and score > maximum_score:
+                errors.append(f"game_result entry: score cannot be greater than {maximum_score}.")
                 continue
             completed_at, timestamp_error = _parse_sync_datetime(item.get("completed_at"), "completed_at")
             if timestamp_error:

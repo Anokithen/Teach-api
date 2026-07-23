@@ -1,15 +1,20 @@
 # TeachAlike API
 
-## Offline pronunciation recognition
+## NVIDIA pronunciation recognition
 
-Reading-session microphone recordings are transcribed locally with Python, Vosk, and ffmpeg. No OpenAI or other cloud speech API is used.
+Reading-session microphone recordings are converted to mono 16 kHz WAV with ffmpeg and transcribed server-side through NVIDIA's ASR endpoint. The returned transcript is then scored by the NVIDIA chat model against the target sentence. The NVIDIA key is never sent to the browser, and matching readings receive the existing leaderboard points. A local similarity fallback keeps scoring available during a temporary NVIDIA outage.
 
 1. Install API dependencies: `pip install -r requirements.txt`.
 2. Install `ffmpeg` and ensure `ffmpeg` is available on the server PATH.
-3. The included development setup uses `models/vosk-model-small-en-us-0.15`. For a different model, download one from https://alphacephei.com/vosk/models and set the directory in the API `.env` file, for example:
+3. Set these server-only variables:
 
    ```env
-   VOSK_MODEL_PATH=/absolute/path/to/vosk-model-small-en-us-0.15
+   NVIDIA_ASR_API_KEY=your-rotated-server-side-key
+   NVIDIA_ASR_API_URL=https://1598d209-5e27-4d3c-8079-4751568b1081.invocation.api.nvcf.nvidia.com/v1/audio/transcriptions
+   NVIDIA_ASR_LANGUAGE=en-US
+   NVIDIA_ASR_REQUEST_TIMEOUT=45
+   NVIDIA_PRONUNCIATION_API_KEY=your-rotated-server-side-key
+   NVIDIA_PRONUNCIATION_REQUEST_TIMEOUT=20
    ```
 
 4. Start the Flask API with `python run.py`.
@@ -18,8 +23,7 @@ Reading-session microphone recordings are transcribed locally with Python, Vosk,
 
 The included `railway.toml`, `Dockerfile`, and `Procfile` are ready for a
 Railway web service. Deploy this directory as the service root. The container
-listens on Railway's `PORT`, installs `ffmpeg`, and downloads the Vosk model
-during the image build.
+listens on Railway's `PORT` and installs `ffmpeg` for audio conversion.
 
 Set `JWT_SECRET_KEY`, `FRONTEND_ORIGINS`, and the Cloudinary variables in
 Railway. A Railway MySQL service can be connected by referencing its native

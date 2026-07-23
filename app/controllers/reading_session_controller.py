@@ -2,7 +2,7 @@ import re
 import math
 from difflib import SequenceMatcher
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 
 from app.extensions import db
@@ -13,7 +13,11 @@ from app.models.voice_profile_model import VoiceProfile
 from app.models.reading_session_model import ReadingSession
 from app.middleware import child_belongs_to_current_parent, voice_profile_belongs_to_current_parent
 from app.controllers.game_result_controller import _award_leaderboard_points
-from app.services.speech_recognition import SpeechRecognitionError, transcribe_audio
+from app.services.nvidia_speech_service import NvidiaSpeechError, transcribe_audio
+from app.services.nvidia_pronunciation_service import (
+    NvidiaPronunciationError,
+    score_pronunciation,
+)
 
 
 PRONUNCIATION_POINTS = 10
@@ -146,7 +150,7 @@ def get_reading_session(session_id):
 
 
 def transcribe_pronunciation(session_id):
-    """Transcribe a microphone recording with the server's offline Python recogniser."""
+    """Transcribe a microphone recording with NVIDIA's hosted ASR service."""
     session = db.session.get(ReadingSession, session_id)
     if not _session_belongs_to_current_parent(session):
         return jsonify({"error": "Reading session not found."}), 404
@@ -160,7 +164,7 @@ def transcribe_pronunciation(session_id):
         if not transcript:
             return jsonify({"error": "No words were heard. Try again a little closer to the microphone."}), 422
         return jsonify({"transcript": transcript}), 200
-    except SpeechRecognitionError as err:
+    except NvidiaSpeechError as err:
         return jsonify({"error": str(err)}), 503
 
 
@@ -191,7 +195,18 @@ def check_pronunciation(session_id):
     if not expected or not spoken:
         return jsonify({"error": "We could not compare that reading. Please try again."}), 400
 
-    score = SequenceMatcher(None, expected, spoken).ratio()
+    scoring_provider = "nvidia"
+    scoring_feedback = None
+    try:
+        score_percent, scoring_feedback = score_pronunciation(
+            sentences[sentence_index], transcript.strip(), current_app.config
+        )
+        score = score_percent / 100
+    except NvidiaPronunciationError:
+        # Keep the test usable when the external scoring provider is briefly
+        # unavailable; transcription still came from NVIDIA ASR above.
+        score = SequenceMatcher(None, expected, spoken).ratio()
+        scoring_provider = "local-fallback"
     correct = score >= PRONUNCIATION_PASS_SCORE
     log = list(session.progress_log or [])
     already_awarded = any(
@@ -211,6 +226,7 @@ def check_pronunciation(session_id):
                 "transcript": transcript.strip(),
                 "accuracy": round(score * 100),
                 "awarded_points": points_awarded,
+                "scoring_provider": scoring_provider,
             }
         )
         session.progress_log = log
@@ -230,6 +246,8 @@ def check_pronunciation(session_id):
                 "accuracy": round(score * 100),
                 "points_awarded": points_awarded,
                 "already_awarded": already_awarded,
+                "scoring_provider": scoring_provider,
+                "feedback": scoring_feedback,
                 "message": message,
             }
         ), 200

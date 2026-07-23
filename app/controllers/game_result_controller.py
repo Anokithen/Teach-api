@@ -26,6 +26,23 @@ def _award_leaderboard_points(child_id, points):
     return entry
 
 
+def _maximum_game_score(game):
+    """Return the maximum score supported by the built-in game content.
+
+    Scores are submitted by the browser, so the API must enforce the same
+    ceiling before adding points to the leaderboard. Unknown/custom game
+    types remain unrestricted for backwards compatibility.
+    """
+    content = game.content if isinstance(game.content, dict) else {}
+    if game.game_type == "quiz":
+        questions = content.get("questions")
+        return len(questions) * 10 if isinstance(questions, list) else None
+    if game.game_type in {"word_puzzle", "spelling"}:
+        words = content.get("words")
+        return min(len(words), 10) * 10 if isinstance(words, list) else None
+    return None
+
+
 def submit_game_result(game_id):
     game = db.session.get(MiniGame, game_id)
     if not game:
@@ -64,6 +81,10 @@ def submit_game_result(game_id):
 
     if errors:
         return jsonify({"errors": errors}), 400
+
+    maximum_score = _maximum_game_score(game)
+    if maximum_score is not None and score > maximum_score:
+        return jsonify({"error": f"score cannot be greater than {maximum_score}."}), 400
 
     try:
         result = GameResult(

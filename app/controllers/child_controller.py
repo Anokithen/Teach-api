@@ -8,6 +8,7 @@ from app.middleware import can_access_child
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
+VALID_READING_LEVELS = {"beginner", "intermediate", "advanced"}
 
 
 def _validate_child_payload(data, partial=False):
@@ -34,9 +35,10 @@ def _validate_child_payload(data, partial=False):
             except (TypeError, ValueError):
                 errors.append("age must be a whole number.")
 
-    if "reading_level" in data and data.get("reading_level") is not None:
-        if str(data.get("reading_level")).strip() == "":
-            errors.append("reading_level cannot be empty.")
+    if "reading_level" in data:
+        reading_level = str(data.get("reading_level") or "").strip().lower()
+        if reading_level not in VALID_READING_LEVELS:
+            errors.append("reading_level must be beginner, intermediate, or advanced.")
 
     if "gender" in data and data.get("gender") not in VALID_GENDERS:
         errors.append("gender must be male, female, other, or prefer_not_to_say.")
@@ -91,7 +93,7 @@ def create_child():
             name=str(data.get("name")).strip(),
             age=int(data.get("age")),
             gender=data.get("gender", "prefer_not_to_say"),
-            reading_level=str(data.get("reading_level")).strip()
+            reading_level=str(data.get("reading_level")).strip().lower()
             if data.get("reading_level")
             else "beginner",
         )
@@ -156,7 +158,7 @@ def update_child(child_id):
         if "age" in data:
             child.age = int(data.get("age"))
         if "reading_level" in data:
-            child.reading_level = str(data.get("reading_level")).strip()
+            child.reading_level = str(data.get("reading_level")).strip().lower()
         if "gender" in data:
             child.gender = data["gender"]
         if data.get("child_pin"):

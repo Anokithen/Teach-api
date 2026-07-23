@@ -125,6 +125,25 @@ class Config:
     # is terminated by the deployment proxy.
     NVIDIA_REQUEST_TIMEOUT = int(_env_value("NVIDIA_REQUEST_TIMEOUT", default="120"))
 
+    # NVIDIA ASR is used server-side for pronunciation recordings. Keep this
+    # separate so the hosted ASR endpoint can differ from chat completions.
+    NVIDIA_ASR_API_KEY = _env_value("NVIDIA_ASR_API_KEY", "NVIDIA_API_KEY", "NVAPI_KEY")
+    NVIDIA_ASR_API_URL = _env_value(
+        "NVIDIA_ASR_API_URL",
+        default="https://1598d209-5e27-4d3c-8079-4751568b1081.invocation.api.nvcf.nvidia.com/v1/audio/transcriptions",
+    )
+    NVIDIA_ASR_LANGUAGE = _env_value("NVIDIA_ASR_LANGUAGE", default="en-US")
+    NVIDIA_ASR_REQUEST_TIMEOUT = int(_env_value("NVIDIA_ASR_REQUEST_TIMEOUT", default="45"))
+    NVIDIA_PRONUNCIATION_API_KEY = _env_value(
+        "NVIDIA_PRONUNCIATION_API_KEY",
+        "NVIDIA_ASR_API_KEY",
+        "NVIDIA_API_KEY",
+        "NVAPI_KEY",
+    )
+    NVIDIA_PRONUNCIATION_REQUEST_TIMEOUT = int(
+        _env_value("NVIDIA_PRONUNCIATION_REQUEST_TIMEOUT", default="20")
+    )
+
     VOSK_MODEL_PATH = os.getenv(
         "VOSK_MODEL_PATH",
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vosk-model-small-en-us-0.15"),
