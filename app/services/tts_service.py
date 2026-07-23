@@ -8,9 +8,6 @@ import wave
 from functools import lru_cache
 from pathlib import Path
 
-import requests
-
-
 class TTSError(Exception):
     """A Coqui TTS setup, download, or inference error safe to show to API users."""
 
@@ -45,6 +42,12 @@ def split_text_into_chunks(text, max_chars=280):
 
 
 def _download_reference_voice(url, destination):
+    try:
+        import requests
+    except ImportError as exc:
+        raise TTSError(
+            "The requests package is not installed for narration generation."
+        ) from exc
     try:
         response = requests.get(url, timeout=60)
         response.raise_for_status()

@@ -3,13 +3,14 @@ from datetime import date, timedelta
 from flask import jsonify, request
 
 from app.extensions import db
+from app.utils import utc_now
 from app.models.child_model import Child
 from app.models.leaderboard_model import LeaderboardEntry
 from app.middleware import child_belongs_to_current_parent
 
 
 def _current_week_start():
-    today = date.today()
+    today = utc_now().date()
     return today - timedelta(days=today.weekday())
 
 
@@ -34,6 +35,7 @@ def get_leaderboard():
     entries = (
         LeaderboardEntry.query.filter_by(week_start=week_start)
         .order_by(LeaderboardEntry.points.desc())
+        .order_by(LeaderboardEntry.id.asc())
         .all()
     )
 
@@ -66,6 +68,7 @@ def get_child_leaderboard_entry(child_id):
     all_entries = (
         LeaderboardEntry.query.filter_by(week_start=week_start)
         .order_by(LeaderboardEntry.points.desc())
+        .order_by(LeaderboardEntry.id.asc())
         .all()
     )
     rank = next((i + 1 for i, e in enumerate(all_entries) if e.id == entry.id), None)

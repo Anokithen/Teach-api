@@ -60,7 +60,14 @@ def get_current_parent():
 
 
 def child_belongs_to_current_parent(child):
-    return child is not None and current_user is not None and child.parent_id == current_user.id
+    """Return whether the current account may use a child's activity APIs.
+
+    Despite the historical name, teachers are also allowed to work with the
+    children they created on behalf of a parent, and admins may inspect all
+    children. Keep this in one helper so nested activity endpoints follow the
+    same access policy as the child profile endpoints.
+    """
+    return can_access_child(child)
 
 
 def can_access_child(child):

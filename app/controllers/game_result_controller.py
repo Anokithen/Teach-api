@@ -37,7 +37,15 @@ def submit_game_result(game_id):
 
     errors = []
     child_id = data.get("child_id")
-    child = db.session.get(Child, child_id) if child_id else None
+    if isinstance(child_id, bool) or not isinstance(child_id, (int, str)):
+        child = None
+    else:
+        try:
+            child_id = int(child_id)
+        except (TypeError, ValueError):
+            child = None
+        else:
+            child = db.session.get(Child, child_id) if child_id > 0 else None
     if not child_id or not child_belongs_to_current_parent(child):
         errors.append("A valid child_id belonging to this account is required.")
 
@@ -46,6 +54,8 @@ def submit_game_result(game_id):
         errors.append("score is required.")
     else:
         try:
+            if isinstance(score, bool) or isinstance(score, float) and not score.is_integer():
+                raise ValueError
             score = int(score)
             if score < 0:
                 errors.append("score cannot be negative.")

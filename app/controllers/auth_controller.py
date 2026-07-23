@@ -101,20 +101,14 @@ def register():
     if Parent.query.filter_by(email=email).first():
         return jsonify({"error": "An account with this email already exists."}), 409
 
-    # Get the requested role
-    role = str(data.get("role", "parent")).strip().lower()
-
-    # Only allow parent or teacher
-    if role not in ["parent", "teacher"]:
-        return jsonify({
-            "error": "Invalid role. You can only register as a parent or teacher."
-        }), 400
-
     try:
+        # Public registration must never be able to create privileged or
+        # staff accounts. Teachers and admins are created through the
+        # authenticated admin endpoints.
         parent = Parent(
             name=str(data.get("name")).strip(),
             email=email,
-            role=role
+            role="parent",
         )
 
         parent.set_password(str(data.get("password")))
@@ -123,7 +117,7 @@ def register():
         db.session.commit()
 
         return jsonify({
-            "message": f"{role.capitalize()} account created successfully.",
+            "message": "Parent account created successfully.",
             "parent": parent.to_dict()
         }), 201
 

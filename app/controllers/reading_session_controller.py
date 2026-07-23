@@ -1,4 +1,5 @@
 import re
+import math
 from difflib import SequenceMatcher
 
 from flask import jsonify, request
@@ -35,6 +36,16 @@ def _session_belongs_to_current_parent(session):
     return child_belongs_to_current_parent(child)
 
 
+def _get_integer_id(model, value):
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        identifier = int(value)
+    except (TypeError, ValueError):
+        return None
+    return db.session.get(model, identifier) if identifier > 0 else None
+
+
 def create_reading_session():
     data = request.get_json(silent=True)
     if not data:
@@ -45,21 +56,27 @@ def create_reading_session():
     book_id = data.get("book_id")
     voice_profile_id = data.get("voice_profile_id")
 
-    child = db.session.get(Child, child_id) if child_id else None
+    child = _get_integer_id(Child, child_id)
     if not child_id or not child_belongs_to_current_parent(child):
         errors.append("A valid child_id belonging to this account is required.")
+    elif child:
+        child_id = child.id
 
-    book = db.session.get(Book, book_id) if book_id else None
+    book = _get_integer_id(Book, book_id)
     if not book_id or not book:
         errors.append("A valid book_id is required.")
+    elif book:
+        book_id = book.id
 
     voice_profile = None
     if voice_profile_id is not None:
-        voice_profile = db.session.get(VoiceProfile, voice_profile_id)
+        voice_profile = _get_integer_id(VoiceProfile, voice_profile_id)
         if not voice_profile_belongs_to_current_parent(voice_profile):
             errors.append("voice_profile_id must reference a voice profile owned by this account.")
         elif voice_profile.status != "ready":
             errors.append("The selected voice profile is not ready yet.")
+        else:
+            voice_profile_id = voice_profile.id
 
     if errors:
         return jsonify({"errors": errors}), 400
@@ -93,12 +110,18 @@ def update_reading_session(session_id):
     try:
         if "progress_entry" in data:
             entry = data.get("progress_entry")
+            if not isinstance(entry, dict):
+                return jsonify({"error": "progress_entry must be an object."}), 400
             log = list(session.progress_log or [])
             log.append(entry)
             session.progress_log = log
 
         if "accuracy_score" in data and data.get("accuracy_score") is not None:
-            session.accuracy_score = float(data.get("accuracy_score"))
+            accuracy_score = float(data.get("accuracy_score"))
+            if not math.isfinite(accuracy_score) or not 0 <= accuracy_score <= 100:
+                db.session.rollback()
+                return jsonify({"error": "accuracy_score must be between 0 and 100."}), 400
+            session.accuracy_score = accuracy_score
 
         if data.get("mark_complete"):
             session.completed_at = utc_now()
@@ -107,6 +130,9 @@ def update_reading_session(session_id):
         return jsonify(
             {"message": "Reading session updated.", "reading_session": session.to_dict()}
         ), 200
+    except (TypeError, ValueError):
+        db.session.rollback()
+        return jsonify({"error": "accuracy_score must be a number between 0 and 100."}), 400
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
@@ -149,7 +175,7 @@ def check_pronunciation(session_id):
     data = request.get_json(silent=True) or {}
     sentence_index = data.get("sentence_index")
     transcript = data.get("transcript")
-    if not isinstance(sentence_index, int) or sentence_index < 0:
+    if isinstance(sentence_index, bool) or not isinstance(sentence_index, int) or sentence_index < 0:
         return jsonify({"error": "A valid sentence_index is required."}), 400
     if not isinstance(transcript, str) or not transcript.strip():
         return jsonify({"error": "A spoken transcript is required."}), 400

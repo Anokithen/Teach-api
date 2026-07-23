@@ -26,6 +26,8 @@ def _validate_child_payload(data, partial=False):
             errors.append("age is required.")
         else:
             try:
+                if isinstance(age, bool) or isinstance(age, float) and not age.is_integer():
+                    raise ValueError
                 age_int = int(age)
                 if age_int <= 0 or age_int > 18:
                     errors.append("age must be a realistic value between 1 and 18.")

@@ -12,7 +12,8 @@ class LeaderboardEntry(db.Model):
     child_id = db.Column(db.Integer, db.ForeignKey("children.id"), nullable=False)
     points = db.Column(db.Integer, nullable=False, default=0)
     streak_count = db.Column(db.Integer, nullable=False, default=0)
-    week_start = db.Column(db.Date, nullable=False, default=utc_now)
+    # This column stores a calendar date, not a timezone-aware datetime.
+    week_start = db.Column(db.Date, nullable=False, default=lambda: utc_now().date())
 
     def to_dict(self, rank=None):
         data = {
