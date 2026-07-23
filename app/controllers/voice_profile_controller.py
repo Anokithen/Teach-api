@@ -3,7 +3,7 @@ from flask_jwt_extended import current_user
 
 from app.extensions import db
 from app.models.voice_profile_model import VoiceProfile, STATUS_READY
-from app.middleware import can_access_voice_profile
+from app.middleware import can_access_voice_profile, owns_voice_profile
 from app.services.cloudinary_service import ALLOWED_EXTENSIONS, delete_voice_sample, signed_voice_delivery_url, upload_voice_sample
 
 
@@ -18,7 +18,12 @@ def create_voice_profile():
     data = request.form
 
     try:
-        voice_sample_url, public_id = upload_voice_sample(sample, current_user.id, current_app.config)
+        voice_sample_url, public_id = upload_voice_sample(
+            sample,
+            current_user.id,
+            current_app.config,
+            owner_name=current_user.name,
+        )
         voice_profile = VoiceProfile(
             parent_id=current_user.id,
             label=str(data.get("label")).strip() if data.get("label") else None,
@@ -93,7 +98,7 @@ def update_voice_profile(voice_profile_id):
 
 def delete_voice_profile(voice_profile_id):
     profile = db.session.get(VoiceProfile, voice_profile_id)
-    if not can_access_voice_profile(profile):
+    if not owns_voice_profile(profile):
         return jsonify({"error": "Voice profile not found."}), 404
 
     try:

@@ -98,6 +98,16 @@ def can_access_voice_profile(voice_profile):
     )
 
 
+def owns_voice_profile(voice_profile):
+    """Only the parent/teacher who uploaded a voice profile may delete it."""
+    return (
+        voice_profile is not None
+        and current_user is not None
+        and current_user.role in (ROLE_PARENT, ROLE_TEACHER)
+        and voice_profile.parent_id == current_user.id
+    )
+
+
 def can_access_book_narration(narration):
     """Narrations inherit access from the private voice profile they use."""
     return (

@@ -1,4 +1,5 @@
 """Server-side Cloudinary storage for private voice recordings."""
+import re
 from uuid import uuid4
 
 # Browsers commonly record as WebM, OGG, or M4A rather than MP3/WAV.
@@ -8,6 +9,32 @@ BOOK_MEDIA_EXTENSIONS = {
     "image": {"jpg", "jpeg", "png", "webp"},
     "video": {"mp4", "webm", "mov"},
 }
+
+
+def _cloudinary_segment(value, fallback):
+    """Turn a user-facing name into a safe, readable Cloudinary path segment."""
+    segment = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
+    return segment or fallback
+
+
+def _owner_folder(owner_id, owner_name=None):
+    """Use the account name as the folder while retaining a safe fallback."""
+    return _cloudinary_segment(owner_name, f"account_{owner_id}")
+
+
+def book_narration_public_id(owner_id, owner_name, book_id, book_title, voice_profile_id):
+    """Return the stable path for one book rendered with one voice profile.
+
+    The voice-profile ID is part of the filename rather than another folder so
+    every profile still gets its own audio while all versions remain grouped
+    below the owner's book folder.
+    """
+    owner_folder = _owner_folder(owner_id, owner_name)
+    book_folder = _cloudinary_segment(book_title, f"book_{book_id}")
+    return (
+        f"teachalike/generated_booksaudio/{owner_folder}/{book_folder}/"
+        f"voice_profile_{voice_profile_id}"
+    )
 
 
 def _cloudinary_modules():
@@ -20,6 +47,8 @@ def _cloudinary_modules():
     """
     try:
         import cloudinary
+        import cloudinary.api
+        import cloudinary.exceptions
         import cloudinary.uploader
         import cloudinary.utils
     except ImportError as exc:
@@ -41,11 +70,14 @@ def configure_cloudinary(config):
     cloudinary.config(**values, secure=True)
 
 
-def upload_voice_sample(file, owner_id, config):
+def upload_voice_sample(file, owner_id, config, owner_name=None):
     cloudinary = _cloudinary_modules()
     configure_cloudinary(config)
     extension = file.filename.rsplit(".", 1)[-1].lower()
-    public_id = f"voice_profiles/{owner_id}/{uuid4().hex}"
+    public_id = (
+        f"teachalike/users_voiceprofiles/{_owner_folder(owner_id, owner_name)}/"
+        f"{uuid4().hex}"
+    )
     result = cloudinary.uploader.upload(
         file,
         resource_type="video",  # Cloudinary handles audio files as video resources.
@@ -57,11 +89,25 @@ def upload_voice_sample(file, owner_id, config):
     return result["secure_url"], result["public_id"]
 
 
-def upload_book_narration(file, owner_id, config):
+def upload_book_narration(
+    file,
+    owner_id,
+    owner_name,
+    book_id,
+    book_title,
+    voice_profile_id,
+    config,
+):
     """Store generated narration as private authenticated Cloudinary audio."""
     cloudinary = _cloudinary_modules()
     configure_cloudinary(config)
-    public_id = f"book_narrations/{owner_id}/{uuid4().hex}"
+    public_id = book_narration_public_id(
+        owner_id,
+        owner_name,
+        book_id,
+        book_title,
+        voice_profile_id,
+    )
     result = cloudinary.uploader.upload(
         file,
         resource_type="video",
@@ -71,6 +117,37 @@ def upload_book_narration(file, owner_id, config):
         overwrite=False,
     )
     return result["secure_url"], result["public_id"]
+
+
+def find_book_narration(public_id, config):
+    """Return an existing authenticated narration asset, if one exists.
+
+    A missing/invalid Cloudinary setup is treated as "not found" here so the
+    normal background job can report the configuration error through its
+    existing status flow.
+    """
+    if not public_id:
+        return None
+    try:
+        cloudinary = _cloudinary_modules()
+    except RuntimeError:
+        return None
+    try:
+        configure_cloudinary(config)
+        return cloudinary.api.resource(
+            public_id,
+            resource_type="video",
+            type="authenticated",
+        )
+    except cloudinary.exceptions.NotFound:
+        return None
+    except cloudinary.exceptions.GeneralError:
+        # A transient Cloudinary API failure should not prevent the normal
+        # narration job from being queued; the worker will report a clear
+        # failure if storage is still unavailable.
+        return None
+    except RuntimeError:
+        return None
 
 
 def signed_narration_delivery_url(public_id, fallback_url, config):

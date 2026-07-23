@@ -13,7 +13,13 @@ from app.middleware import can_access_book_narration, voice_profile_belongs_to_c
 from app.models.book_model import Book
 from app.models.book_narration_model import BookNarration, STATUS_FAILED, STATUS_PROCESSING, STATUS_READY
 from app.models.voice_profile_model import STATUS_READY as VOICE_STATUS_READY, VoiceProfile
-from app.services.cloudinary_service import signed_narration_delivery_url, signed_voice_delivery_url, upload_book_narration
+from app.services.cloudinary_service import (
+    book_narration_public_id,
+    find_book_narration,
+    signed_narration_delivery_url,
+    signed_voice_delivery_url,
+    upload_book_narration,
+)
 from app.services.tts_service import TTSError, synthesize_narration
 
 
@@ -45,7 +51,15 @@ def _generate_narration(app, narration_id):
                 output_path = output.name
             synthesize_narration(book.text_content, reference_url, output_path, app.config)
             with open(output_path, "rb") as audio_file:
-                audio_url, public_id = upload_book_narration(audio_file, profile.parent_id, app.config)
+                audio_url, public_id = upload_book_narration(
+                    audio_file,
+                    profile.parent_id,
+                    profile.parent.name,
+                    book.id,
+                    book.title,
+                    profile.id,
+                    app.config,
+                )
             narration.narration_audio_url = audio_url
             narration.cloudinary_public_id = public_id
             narration.error_message = None
@@ -109,8 +123,26 @@ def create_book_narration(book_id):
     if not (book.text_content or "").strip():
         return jsonify({"errors": ["This book has no text available for narration."]}), 400
 
+    # The stable public ID lets the API recover an already-generated file even
+    # if its database row was lost or a previous request stopped after upload.
+    narration_public_id = book_narration_public_id(
+        profile.parent_id,
+        profile.parent.name,
+        book.id,
+        book.title,
+        profile.id,
+    )
     existing = BookNarration.query.filter_by(book_id=book.id, voice_profile_id=profile.id).first()
     if existing:
+        if existing.status != STATUS_READY:
+            stored_asset = find_book_narration(narration_public_id, current_app.config)
+            if stored_asset:
+                existing.narration_audio_url = stored_asset.get("secure_url")
+                existing.cloudinary_public_id = stored_asset.get("public_id", narration_public_id)
+                existing.error_message = None
+                existing.status = STATUS_READY
+                db.session.commit()
+                return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
         # Preserve the unique cache row, but allow a failed transient/configuration
         # job to be retried after the server has been corrected.
         if existing.status == STATUS_FAILED:
@@ -124,8 +156,27 @@ def create_book_narration(book_id):
             # restart. Re-queue it so the UI cannot remain stuck indefinitely.
             return jsonify({"message": "Narration generation restarted.", "book_narration": existing.to_dict(), "existing": True}), 202
         return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
+
+    stored_asset = find_book_narration(narration_public_id, current_app.config)
+    if stored_asset:
+        narration = BookNarration(
+            book_id=book.id,
+            voice_profile_id=profile.id,
+            status=STATUS_READY,
+            narration_audio_url=stored_asset.get("secure_url"),
+            cloudinary_public_id=stored_asset.get("public_id", narration_public_id),
+        )
+        db.session.add(narration)
+        db.session.commit()
+        return jsonify({"book_narration": narration.to_dict(), "existing": True}), 200
+
     try:
-        narration = BookNarration(book_id=book.id, voice_profile_id=profile.id, status=STATUS_PROCESSING)
+        narration = BookNarration(
+            book_id=book.id,
+            voice_profile_id=profile.id,
+            status=STATUS_PROCESSING,
+            cloudinary_public_id=narration_public_id,
+        )
         db.session.add(narration)
         db.session.commit()
     except IntegrityError:

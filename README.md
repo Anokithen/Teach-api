@@ -55,6 +55,24 @@ The browser records audio, uploads it to the authenticated `/api/reading-session
 
 Book preview narrations are generated separately from reading sessions. A parent selects one of their ready voice profiles and requests a cached narration for that `(book, voice profile)` pair. Generated audio and source recordings are private authenticated Cloudinary resources; the API only redirects to a signed URL after an ownership check.
 
+Cloudinary storage is organized as follows:
+
+```text
+teachalike/
+├── users_voiceprofiles/<parent-or-teacher-name>/<random-upload-id>
+└── generated_booksaudio/<parent-or-teacher-name>/<book-name>/voice_profile_<id>
+```
+
+Voice-profile uploads use a random file ID, so every recording is retained and
+the owning parent or teacher can delete only their own profile through the API.
+Book narration files use a stable path based on the owner, book, and selected
+voice-profile ID. The database also has a unique `(book_id, voice_profile_id)`
+constraint. Reusing the same book with the same voice profile returns the
+existing narration; choosing another voice profile creates a separate audio
+file in the same book folder. The API also checks Cloudinary for the stable
+file before generating, so an existing file can be recovered if its database
+row is missing.
+
 Set these server environment variables (the defaults are also in `.env.example`):
 
 ```env
