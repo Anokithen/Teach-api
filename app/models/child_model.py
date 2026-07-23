@@ -18,6 +18,15 @@ class Child(db.Model):
     reading_level = db.Column(db.String(50), nullable=False, default="beginner")
     created_at = db.Column(db.DateTime, default=utc_now)
 
+    # Keep this nullable creator link intact when a teacher account is
+    # removed. SQLAlchemy will set created_by_id to NULL instead of allowing
+    # the foreign-key constraint to prevent teacher deletion.
+    created_by = db.relationship(
+        "Parent",
+        foreign_keys=[created_by_id],
+        backref="created_children",
+    )
+
     reading_sessions = db.relationship(
         "ReadingSession", backref="child", cascade="all, delete-orphan", lazy=True
     )

@@ -28,7 +28,15 @@ def _build_database_uri():
     # project. The public URL remains supported for external/local access.
     railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
     if railway_url:
-        return railway_url.replace("mysql://", "mysql+pymysql://", 1)
+        scheme, separator, remainder = railway_url.partition("://")
+        if not separator or scheme.lower() not in {"mysql", "mysql+pymysql"}:
+            raise ValueError(
+                "Only MySQL connection URLs are supported. Configure MYSQL_URL "
+                "or a mysql:// DATABASE_URL."
+            )
+        # Always use SQLAlchemy's MySQL dialect with the PyMySQL driver,
+        # regardless of whether Railway supplied mysql:// or mysql+pymysql://.
+        return f"mysql+pymysql://{remainder}"
 
     # Also support the exact variable names exposed by Railway's MySQL
     # service, plus the DB_* names used by local development.
@@ -67,6 +75,8 @@ def _database_config_source():
 
 
 class Config:
+    # Flask-SQLAlchemy delegates MySQL connections to PyMySQL through this
+    # explicit dialect URL. Other database engines are unsupported.
     SQLALCHEMY_DATABASE_URI = _build_database_uri()
     DATABASE_CONFIG_SOURCE = _database_config_source()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -76,11 +86,14 @@ class Config:
         "pool_recycle": 280,
         "connect_args": {"connect_timeout": 5},
     }
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-key-change-me")
-    # Flask-JWT-Extended reads JWT_ACCESS_TOKEN_EXPIRES. JWT_TIMEOUT is kept
-    # as the environment variable for compatibility with existing deployments.
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        days=int(os.getenv("JWT_TIMEOUT", "15"))
+    JWT_SECRET_KEY = _env_value("JWT_SECRET_KEY", default="super-secret-key-change-me")
+    # The documented setting is minutes. Keep JWT_TIMEOUT (days) for older
+    # Railway environments that already use it.
+    _access_token_minutes = _env_value("JWT_ACCESS_TOKEN_EXPIRES_MINUTES")
+    JWT_ACCESS_TOKEN_EXPIRES = (
+        timedelta(minutes=int(_access_token_minutes))
+        if _access_token_minutes
+        else timedelta(days=int(_env_value("JWT_TIMEOUT", default="15")))
     )
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))

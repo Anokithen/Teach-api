@@ -33,9 +33,6 @@ reference such as `${{MySQL.MYSQL_URL}}`, or add references for each `MYSQL*`
 variable. The reference must resolve to a value; literal `${{...}}` text means
 the variable was configured on the wrong service.
 
-Use `/api/health` to check the web process and `/api/health/db` to check the
-MySQL connection.
-
 The service uses Gunicorn's one-worker default because each worker can load a
 separate copy of the optional TTS model. Increase workers only by changing the
 start command when the Railway service has enough memory.

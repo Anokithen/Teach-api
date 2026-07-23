@@ -44,7 +44,7 @@ def _create_account(role):
     if errors:
         return jsonify({"errors": errors}), 400
 
-    email = str(data.get("email")).strip()
+    email = str(data.get("email")).strip().lower()
     if Parent.query.filter_by(email=email).first():
         return jsonify({"error": "An account with this email already exists."}), 409
 

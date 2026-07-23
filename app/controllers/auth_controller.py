@@ -139,7 +139,7 @@ def login():
         return jsonify({"errors": errors}), 400
 
     try:
-        email = str(data.get("email")).strip()
+        email = str(data.get("email")).strip().lower()
         parent = Parent.query.filter_by(email=email).first()
 
         if not parent or not parent.check_password(str(data.get("password"))):

@@ -1,6 +1,5 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from sqlalchemy import text
 from werkzeug.exceptions import RequestEntityTooLarge
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -49,20 +48,6 @@ def create_app():
         return False
 
     register_blueprints(app)
-
-    @app.get("/api/health")
-    def health():
-        return jsonify({"status": "ok"}), 200
-
-    @app.get("/api/health/db")
-    def database_health():
-        """A public, credential-free connectivity check for Railway debugging."""
-        try:
-            db.session.execute(text("SELECT 1"))
-            return jsonify({"status": "ok", "database": "ok"}), 200
-        except Exception:
-            db.session.rollback()
-            return jsonify({"status": "error", "database": "unreachable"}), 503
 
     @app.errorhandler(OperationalError)
     def handle_operational_error(err):
