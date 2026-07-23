@@ -1,13 +1,24 @@
 """Create a complete, repeatable TeachAlike demo dataset.
 
-Run from the project root after configuring the database in ``.env``:
+Run from the project root after configuring the database in ``.env``::
 
     python seed.py
 
-The script never deletes data and can be run repeatedly. Existing records are
-kept; only the missing demo records are created. Passwords can be overridden
-with ``SEED_ADMIN_PASSWORD``, ``SEED_PARENT_PASSWORD``, and
-``SEED_TEACHER_PASSWORD``.
+The script is additive and idempotent. It never deletes existing records or
+changes passwords for accounts that already exist. It creates demo accounts,
+children, books, mini-games, reading progress, feedback, game results, and
+current-week leaderboard entries.
+
+Voice profiles use a configurable demo URL by default. They do not create a
+Cloudinary asset, because a seed should not make external uploads implicitly.
+To make seeded narration records available as well, provide both of these
+environment variables before running the script::
+
+    SEED_NARRATION_AUDIO_URL=https://...
+    SEED_NARRATION_CLOUDINARY_PUBLIC_ID=book_narrations/seed/demo
+
+The default passwords can be overridden with ``SEED_*_PASSWORD`` variables.
+These credentials are for development only and must be changed in production.
 """
 import os
 from datetime import timedelta
@@ -16,6 +27,7 @@ from app import create_app
 from app.controllers.game_result_controller import _current_week_start
 from app.extensions import db
 from app.models.book_model import Book
+from app.models.book_narration_model import BookNarration, STATUS_READY as NARRATION_READY
 from app.models.child_model import Child
 from app.models.feedback_model import Feedback
 from app.models.game_result_model import GameResult
@@ -25,6 +37,12 @@ from app.models.reading_session_model import ReadingSession
 from app.models.voice_profile_model import STATUS_READY, VoiceProfile
 from app.services.book_games import create_default_mini_games
 from app.utils import utc_now
+
+
+DEMO_VOICE_URL = os.getenv(
+    "SEED_VOICE_SAMPLE_URL",
+    "https://samplelib.com/lib/preview/mp3/sample-3s.mp3",
+)
 
 
 BOOKS = [
@@ -63,6 +81,7 @@ BOOKS = [
         "age_group": "7-9",
         "reading_level": "intermediate",
         "cover_image_url": "https://placehold.co/600x800/1d4ed8/ffffff?text=Adventures+in+Space",
+        "video_url": "https://res.cloudinary.com/demo/video/upload/dog.mp4",
         "text_content": (
             "Captain Mia checked every button in her small rocket ship. Beyond the window, planets glimmered like marbles. "
             "Her robot friend Atlas mapped a safe path through an asteroid field. Together they discovered a quiet purple moon."
@@ -85,7 +104,8 @@ BOOKS = [
         "cover_image_url": "https://placehold.co/600x800/0f766e/ffffff?text=The+Inventor%27s+Surprise",
         "text_content": (
             "Arun carefully adjusted the gears inside his recycling machine. Instead of sorting paper, it began composing cheerful music. "
-            "After testing each connection, Arun discovered that a loose copper wire had changed the program. He presented the musical invention at the school fair."
+            "After testing each connection, Arun discovered that a loose copper wire had changed the program. "
+            "He presented the musical invention at the school fair."
         ),
     },
 ]
@@ -127,53 +147,108 @@ def get_or_create_book(data):
     return book, True
 
 
-def seed_activity(child, books):
-    """Add sample progress only when this demo child has no prior activity."""
-    if ReadingSession.query.filter_by(child_id=child.id).first():
-        return 0
+def get_or_create_voice_profile(parent, label):
+    """Create a playable demo profile without uploading to Cloudinary."""
+    profile = VoiceProfile.query.filter_by(parent_id=parent.id, label=label).first()
+    if profile:
+        # Repair the old seed's example.com placeholder if this script is run
+        # against a database seeded by an earlier version.
+        if (profile.voice_sample_url or "").startswith("https://example.com/"):
+            profile.voice_sample_url = DEMO_VOICE_URL
+            profile.cloudinary_public_id = None
+            profile.status = STATUS_READY
+        return profile, False
 
-    first_book, second_book = books[0], books[3]
-    completed_at = utc_now() - timedelta(days=1)
-    completed_session = ReadingSession(
+    profile = VoiceProfile(
+        parent_id=parent.id,
+        label=label,
+        voice_sample_url=DEMO_VOICE_URL,
+        # A null public ID makes the API use the stored fallback URL. A real
+        # uploaded profile will have a Cloudinary public ID instead.
+        cloudinary_public_id=None,
+        status=STATUS_READY,
+    )
+    db.session.add(profile)
+    return profile, True
+
+
+def get_or_create_session(child, book, voice_profile, *, completed, accuracy, minutes_ago):
+    session = (
+        ReadingSession.query.filter_by(child_id=child.id, book_id=book.id)
+        .order_by(ReadingSession.id.asc())
+        .first()
+    )
+    if session:
+        return session, False
+
+    started_at = utc_now() - timedelta(minutes=minutes_ago)
+    completed_at = started_at + timedelta(minutes=8) if completed else None
+    session = ReadingSession(
         child_id=child.id,
-        book_id=first_book.id,
-        started_at=completed_at - timedelta(minutes=8),
+        book_id=book.id,
+        voice_profile_id=voice_profile.id if voice_profile else None,
+        started_at=started_at,
         completed_at=completed_at,
-        accuracy_score=92,
+        accuracy_score=accuracy,
         progress_log=[
-            {"type": "pronunciation_check", "sentence_index": 0, "accuracy": 96, "awarded_points": 10},
-            {"type": "pronunciation_check", "sentence_index": 1, "accuracy": 92, "awarded_points": 10},
+            {"type": "pronunciation_check", "sentence_index": 0, "accuracy": accuracy, "awarded_points": 10 if completed else 0},
+            {"type": "pronunciation_check", "sentence_index": 1, "accuracy": max(0, accuracy - 3), "awarded_points": 10 if completed else 0},
         ],
     )
-    active_session = ReadingSession(
+    db.session.add(session)
+    return session, True
+
+
+def ensure_feedback(session, feedback_type, text):
+    if Feedback.query.filter_by(session_id=session.id, feedback_type=feedback_type).first():
+        return False
+    db.session.add(Feedback(
+        session_id=session.id,
+        feedback_type=feedback_type,
+        feedback_text=text,
+    ))
+    return True
+
+
+def ensure_game_result(child, game, score):
+    if GameResult.query.filter_by(child_id=child.id, game_id=game.id).first():
+        return False
+    db.session.add(GameResult(child_id=child.id, game_id=game.id, score=score))
+    return True
+
+
+def ensure_leaderboard_entry(child, points, streak_count):
+    entry = LeaderboardEntry.query.filter_by(
         child_id=child.id,
-        book_id=second_book.id,
-        started_at=utc_now() - timedelta(minutes=3),
-        accuracy_score=84,
-        progress_log=[{"type": "pronunciation_check", "sentence_index": 0, "accuracy": 84, "awarded_points": 0}],
-    )
-    db.session.add_all([completed_session, active_session])
-    db.session.flush()
-    db.session.add_all([
-        Feedback(session_id=completed_session.id, feedback_type="praise", feedback_text="Wonderful reading! You used a clear, confident voice."),
-        Feedback(session_id=completed_session.id, feedback_type="tip", feedback_text="Try pausing briefly at each full stop before you continue."),
-    ])
-
-    games = {game.book_id: game for book in books for game in book.mini_games if game.game_type == "quiz"}
-    score_total = 0
-    for book, score in ((first_book, 30), (second_book, 45)):
-        game = games.get(book.id)
-        if game:
-            db.session.add(GameResult(child_id=child.id, game_id=game.id, score=score))
-            score_total += score
-    return score_total + 20  # Includes the two successful pronunciation checks.
+        week_start=_current_week_start(),
+    ).first()
+    if entry:
+        return False
+    db.session.add(LeaderboardEntry(
+        child_id=child.id,
+        week_start=_current_week_start(),
+        points=points,
+        streak_count=streak_count,
+    ))
+    return True
 
 
-def ensure_leaderboard_entry(child, points):
-    week_start = _current_week_start()
-    entry = LeaderboardEntry.query.filter_by(child_id=child.id, week_start=week_start).first()
-    if not entry:
-        db.session.add(LeaderboardEntry(child_id=child.id, week_start=week_start, points=points, streak_count=3))
+def ensure_optional_narration(book, voice_profile):
+    """Seed a ready narration only when the caller provides a real asset."""
+    audio_url = os.getenv("SEED_NARRATION_AUDIO_URL", "").strip()
+    public_id = os.getenv("SEED_NARRATION_CLOUDINARY_PUBLIC_ID", "").strip()
+    if not audio_url or not public_id:
+        return False
+    if BookNarration.query.filter_by(book_id=book.id, voice_profile_id=voice_profile.id).first():
+        return False
+    db.session.add(BookNarration(
+        book_id=book.id,
+        voice_profile_id=voice_profile.id,
+        status=NARRATION_READY,
+        narration_audio_url=audio_url,
+        cloudinary_public_id=public_id,
+    ))
+    return True
 
 
 def main():
@@ -181,61 +256,136 @@ def main():
     with app.app_context():
         db.create_all()
 
-        admin, admin_created = get_or_create_account(
-            "Site Admin",
-            os.getenv("SEED_ADMIN_EMAIL", "admin@teachalike.app"),
-            ROLE_ADMIN,
-            os.getenv("SEED_ADMIN_PASSWORD", "ChangeMe123!"),
-        )
-        parent, parent_created = get_or_create_account(
-            "Jamie Perera",
-            os.getenv("SEED_PARENT_EMAIL", "jamie@teachalike.app"),
-            ROLE_PARENT,
-            os.getenv("SEED_PARENT_PASSWORD", "ParentDemo123!"),
-        )
-        teacher, teacher_created = get_or_create_account(
-            "Alex Silva",
-            os.getenv("SEED_TEACHER_EMAIL", "alex.teacher@teachalike.app"),
-            ROLE_TEACHER,
-            os.getenv("SEED_TEACHER_PASSWORD", "TeacherDemo123!"),
-        )
-        db.session.flush()
-
-        children = [
-            get_or_create_child(parent, None, "Ava", 6, "female", "beginner", "123456")[0],
-            get_or_create_child(parent, teacher, "Noah", 8, "male", "intermediate", "234567")[0],
+        account_specs = [
+            ("Site Admin", os.getenv("SEED_ADMIN_EMAIL", "admin@teachalike.app"), ROLE_ADMIN, os.getenv("SEED_ADMIN_PASSWORD", "ChangeMe123!")),
+            ("Jamie Perera", os.getenv("SEED_PARENT_EMAIL", "jamie@teachalike.app"), ROLE_PARENT, os.getenv("SEED_PARENT_PASSWORD", "ParentDemo123!")),
+            ("Priya Fernando", os.getenv("SEED_PARENT_2_EMAIL", "priya@teachalike.app"), ROLE_PARENT, os.getenv("SEED_PARENT_2_PASSWORD", "ParentDemo123!")),
+            ("Alex Silva", os.getenv("SEED_TEACHER_EMAIL", "alex.teacher@teachalike.app"), ROLE_TEACHER, os.getenv("SEED_TEACHER_PASSWORD", "TeacherDemo123!")),
         ]
+        accounts = {}
+        accounts_created = 0
+        for key, name, email, role, password in (
+            ("admin", *account_specs[0]),
+            ("parent", *account_specs[1]),
+            ("parent_2", *account_specs[2]),
+            ("teacher", *account_specs[3]),
+        ):
+            accounts[key], created = get_or_create_account(name, email, role, password)
+            accounts_created += int(created)
         db.session.flush()
 
-        voice_profile = VoiceProfile.query.filter_by(parent_id=parent.id, label="Jamie's voice").first()
-        if not voice_profile:
-            db.session.add(VoiceProfile(
-                parent_id=parent.id,
-                label="Jamie's voice",
-                voice_sample_url="https://example.com/demo-voice-sample.mp3",
-                cloudinary_public_id="seed/jamie-demo-voice",
-                status=STATUS_READY,
+        child_specs = [
+            (accounts["parent"], None, "Ava", 6, "female", "beginner", "123456"),
+            (accounts["parent"], accounts["teacher"], "Noah", 8, "male", "intermediate", "234567"),
+            (accounts["parent_2"], accounts["teacher"], "Maya", 10, "female", "advanced", "345678"),
+            (accounts["parent_2"], None, "Leo", 5, "male", "beginner", "456789"),
+        ]
+        children = []
+        children_created = 0
+        for spec in child_specs:
+            child, created = get_or_create_child(*spec)
+            children.append(child)
+            children_created += int(created)
+        db.session.flush()
+
+        books = []
+        books_created = 0
+        for data in BOOKS:
+            book, created = get_or_create_book(data)
+            books.append(book)
+            books_created += int(created)
+        db.session.flush()
+
+        games_added = 0
+        for book in books:
+            games_added += len(create_default_mini_games(book))
+        db.session.flush()
+
+        jamie_voice, jamie_voice_created = get_or_create_voice_profile(accounts["parent"], "Jamie's voice")
+        priya_voice, priya_voice_created = get_or_create_voice_profile(accounts["parent_2"], "Priya's voice")
+        db.session.flush()
+
+        voice_by_child = {
+            children[0].id: jamie_voice,
+            children[1].id: jamie_voice,
+            children[2].id: priya_voice,
+            children[3].id: priya_voice,
+        }
+        sessions_created = 0
+        feedback_created = 0
+        game_results_created = 0
+        leaderboard_created = 0
+
+        quiz_games = {
+            book.id: next((game for game in book.mini_games if game.game_type == "quiz"), None)
+            for book in books
+        }
+        for child_index, child in enumerate(children):
+            voice_profile = voice_by_child[child.id]
+            completed, created = get_or_create_session(
+                child,
+                books[child_index % 3],
+                voice_profile,
+                completed=True,
+                accuracy=92 - child_index * 4,
+                minutes_ago=1440 + child_index * 30,
+            )
+            sessions_created += int(created)
+            db.session.flush()
+            feedback_created += int(ensure_feedback(
+                completed,
+                "praise",
+                "Wonderful reading! You used a clear, confident voice.",
+            ))
+            feedback_created += int(ensure_feedback(
+                completed,
+                "tip",
+                "Try pausing briefly at each full stop before you continue.",
             ))
 
-        books = [get_or_create_book(book_data)[0] for book_data in BOOKS]
-        db.session.flush()
-        games_added = sum(len(create_default_mini_games(book)) for book in books)
-        db.session.flush()
+            _, created = get_or_create_session(
+                child,
+                books[(child_index % 3) + 3],
+                voice_profile,
+                completed=False,
+                accuracy=84 - child_index * 3,
+                minutes_ago=3 + child_index,
+            )
+            sessions_created += int(created)
 
-        ava_points = seed_activity(children[0], books)
-        noah_points = seed_activity(children[1], books)
-        ensure_leaderboard_entry(children[0], ava_points or 65)
-        ensure_leaderboard_entry(children[1], noah_points or 40)
+            for book_index, score in ((child_index % 3, 30 + child_index * 4), ((child_index + 1) % 3, 42 + child_index * 3)):
+                game = quiz_games[books[book_index].id]
+                if game:
+                    game_results_created += int(ensure_game_result(child, game, score))
+
+            leaderboard_created += int(ensure_leaderboard_entry(
+                child,
+                points=70 + child_index * 15,
+                streak_count=3 + child_index,
+            ))
+
+        db.session.flush()
+        narrations_created = int(ensure_optional_narration(books[0], jamie_voice))
         db.session.commit()
 
-        created_accounts = sum((admin_created, parent_created, teacher_created))
         print("TeachAlike demo data is ready.")
-        print(f"Accounts created: {created_accounts}; books available: {len(books)}; mini-games added: {games_added}.")
-        print("Demo logins (only printed credentials should be changed in non-development environments):")
-        print(f"  Admin:   {admin.email} / {os.getenv('SEED_ADMIN_PASSWORD', 'ChangeMe123!')}")
-        print(f"  Parent:  {parent.email} / {os.getenv('SEED_PARENT_PASSWORD', 'ParentDemo123!')}")
-        print(f"  Teacher: {teacher.email} / {os.getenv('SEED_TEACHER_PASSWORD', 'TeacherDemo123!')}")
-        print("Child PINs: Ava 123456, Noah 234567")
+        print(
+            "Created: "
+            f"{accounts_created} accounts, {children_created} children, "
+            f"{books_created} books, {games_added} mini-games, "
+            f"{int(jamie_voice_created) + int(priya_voice_created)} voice profiles, "
+            f"{sessions_created} reading sessions, {feedback_created} feedback entries, "
+            f"{game_results_created} game results, {leaderboard_created} leaderboard entries, "
+            f"{narrations_created} narration records."
+        )
+        print("Demo logins:")
+        print(f"  Admin:   {accounts['admin'].email} / {account_specs[0][3]}")
+        print(f"  Parent:  {accounts['parent'].email} / {account_specs[1][3]}")
+        print(f"  Parent 2:{accounts['parent_2'].email} / {account_specs[2][3]}")
+        print(f"  Teacher: {accounts['teacher'].email} / {account_specs[3][3]}")
+        print("Child PINs: Ava 123456, Noah 234567, Maya 345678, Leo 456789")
+        if not os.getenv("SEED_NARRATION_AUDIO_URL") or not os.getenv("SEED_NARRATION_CLOUDINARY_PUBLIC_ID"):
+            print("Narration asset skipped; set SEED_NARRATION_AUDIO_URL and SEED_NARRATION_CLOUDINARY_PUBLIC_ID to seed one.")
 
 
 if __name__ == "__main__":
