@@ -5,9 +5,6 @@ from app import create_app
 app = create_app()
 
 if __name__ == "__main__":
-    from init_db import initialize_database
-
-    initialize_database(app)
     app.run(
         debug=os.getenv("FLASK_DEBUG", "false").lower() == "true",
         host="0.0.0.0",

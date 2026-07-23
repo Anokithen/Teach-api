@@ -22,61 +22,53 @@ def _env_value(*names, default=""):
     return default
 
 
-def _build_database_uri():
+# def _build_database_uri():
 
-    railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
-    if railway_url:
-        scheme, separator, remainder = railway_url.partition("://")
-        if not separator or scheme.lower() not in {"mysql", "mysql+pymysql"}:
-            raise ValueError(
-                "Only MySQL connection URLs are supported. Configure MYSQL_URL "
-                "or a mysql:// DATABASE_URL."
-            )
+#     railway_url = _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL")
+#     if railway_url:
+#         scheme, separator, remainder = railway_url.partition("://")
+#         if not separator or scheme.lower() not in {"mysql", "mysql+pymysql"}:
+#             raise ValueError(
+#                 "Only MySQL connection URLs are supported. Configure MYSQL_URL "
+#                 "or a mysql:// DATABASE_URL."
+#             )
       
-        return f"mysql+pymysql://{remainder}"
+#         return f"mysql+pymysql://{remainder}"
 
   
-    db_user = _env_value("MYSQLUSER", "DB_USER", default="root")
-    db_password = _env_value(
-        "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD", "DB_PASSWORD", default="root123"
-    )
-    db_host = _env_value("MYSQLHOST", "DB_HOST", default="localhost")
-    db_port = _env_value("MYSQLPORT", "DB_PORT", default="3306")
-    db_name = _env_value(
-        "MYSQLDATABASE", "MYSQL_DATABASE", "DB_NAME", default="teachalike_db"
-    )
+#     db_user = _env_value("MYSQLUSER", "DB_USER", default="root")
+#     db_password = _env_value(
+#         "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD", "DB_PASSWORD", default="root123"
+#     )
+#     db_host = _env_value("MYSQLHOST", "DB_HOST", default="localhost")
+#     db_port = _env_value("MYSQLPORT", "DB_PORT", default="3306")
+#     db_name = _env_value(
+#         "MYSQLDATABASE", "MYSQL_DATABASE", "DB_NAME", default="teachalike_db"
+#     )
 
-    return (
-        f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}"
-        f"@{db_host}:{db_port}/{quote_plus(db_name)}"
-    )
-
-
-def _database_config_source():
-    if _env_value("MYSQL_URL", "MYSQL_PUBLIC_URL", "DATABASE_URL"):
-        return "MYSQL_URL/DATABASE_URL"
-    if _env_value(
-        "MYSQLHOST",
-        "MYSQLPORT",
-        "MYSQLUSER",
-        "MYSQLPASSWORD",
-        "MYSQL_ROOT_PASSWORD",
-        "MYSQLDATABASE",
-        "MYSQL_DATABASE",
-    ):
-        return "MYSQL_*"
-    if _env_value("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"):
-        return "DB_*"
-    return "defaults"
+    # return (
+    #     f"mysql+pymysql://{quote_plus(db_user)}:{quote_plus(db_password)}"
+    #     f"@{db_host}:{db_port}/{quote_plus(db_name)}"
+    # )
 
 
 class Config:
-   
-    SQLALCHEMY_DATABASE_URI = _build_database_uri()
-    DATABASE_CONFIG_SOURCE = _database_config_source()
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_HOST = os.getenv("DB_HOST")
+    DB_NAME = os.getenv("DB_NAME")
+    DB_PORT = os.getenv("DB_PORT", "3306")
+
+    SQLALCHEMY_DATABASE_URI = (
+        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
-      
+
         "pool_pre_ping": True,
         "pool_recycle": 280,
         "connect_args": {"connect_timeout": 5},

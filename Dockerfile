@@ -25,4 +25,4 @@ RUN mkdir -p /app/models \
 
 COPY . .
 
-CMD ["sh", "-c", "python init_db.py && exec gunicorn --bind 0.0.0.0:${PORT:-5000} --threads 4 --timeout 120 --access-logfile - --error-logfile - run:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-5000} --threads 4 --timeout 120 --access-logfile - --error-logfile - run:app"]
