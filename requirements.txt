@@ -28,13 +28,13 @@ six==1.17.0
 SQLAlchemy==2.0.51
 # Maintained fork of the legacy ``TTS`` package; provides the same ``TTS.api``
 # module and supports Python 3.12 used by local development.
-coqui-tts==0.27.5
+# coqui-tts==0.27.5
 # Coqui intentionally leaves the inference backend optional. CPU wheels are
 # installed from the PyTorch CPU index in Docker/local setup (see README).
-torch==2.7.1
-torchaudio==2.7.1
+# torch==2.7.1
+# torchaudio==2.7.1
 # XTTS currently imports a Transformers 4.x utility removed in Transformers 5.
-transformers>=4.57,<5
+# transformers>=4.57,<5
 typing_extensions==4.15.0
 tzdata==2026.2
 Werkzeug==3.1.8
