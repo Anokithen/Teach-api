@@ -16,6 +16,7 @@ class VoiceProfile(db.Model):
     label = db.Column(db.String(80), nullable=True)  # e.g. "Mum's voice"
     voice_sample_url = db.Column(db.String(500), nullable=False)
     cloudinary_public_id = db.Column(db.String(255), nullable=True, unique=True)
+    elevenlabs_voice_id = db.Column(db.String(255), nullable=True, unique=True)
     status = db.Column(db.String(20), nullable=False, default=STATUS_PROCESSING)
     created_at = db.Column(db.DateTime, default=utc_now)
 
@@ -32,6 +33,7 @@ class VoiceProfile(db.Model):
             "parent_id": self.parent_id,
             "label": self.label,
             "voice_sample_url": self.voice_sample_url,
+            "has_cloned_voice": bool(self.elevenlabs_voice_id),
             "owner_name": self.parent.name if self.parent else None,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,

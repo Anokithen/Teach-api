@@ -113,7 +113,7 @@ def upload_book_narration(
         resource_type="video",
         type="authenticated",
         public_id=public_id,
-        format="wav",
+        format="mp3",
         overwrite=False,
     )
     return result["secure_url"], result["public_id"]

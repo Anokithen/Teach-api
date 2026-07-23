@@ -8,6 +8,8 @@ from app.models.child_model import Child
 from app.models.book_model import Book
 from app.services.book_games import create_default_mini_games
 from app.services.cloudinary_service import upload_book_media
+from app.services.gemini_service import GeminiError, generate_book_draft as generate_gemini_book_draft
+from app.services.nvidia_service import NvidiaError, generate_book_draft as generate_nvidia_book_draft
 
 
 def _validate_new_account_payload(data):
@@ -83,6 +85,7 @@ def create_book():
     title = str(data.get("title", "")).strip()
     age_group = str(data.get("age_group", "")).strip()
     reading_level = str(data.get("reading_level", "")).strip().lower()
+    image_urls = data.get("image_urls") or []
     valid_levels = {"beginner", "intermediate", "advanced"}
 
     if not title:
@@ -91,6 +94,11 @@ def create_book():
         errors.append("age_group is required.")
     if reading_level not in valid_levels:
         errors.append("reading_level must be beginner, intermediate, or advanced.")
+    if not isinstance(image_urls, list) or len(image_urls) > 8 or any(
+        not isinstance(url, str) or not url.strip().startswith(("http://", "https://"))
+        for url in image_urls
+    ):
+        errors.append("image_urls must contain up to 8 HTTP(S) image URLs.")
     if errors:
         return jsonify({"errors": errors}), 400
 
@@ -103,6 +111,7 @@ def create_book():
             content_url=str(data.get("content_url", "")).strip() or None,
             cover_image_url=str(data.get("cover_image_url", "")).strip() or None,
             video_url=str(data.get("video_url", "")).strip() or None,
+            image_urls=[url.strip() for url in image_urls],
         )
         db.session.add(book)
         db.session.flush()
@@ -116,6 +125,36 @@ def create_book():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def generate_book_draft_for_admin():
+    """POST /api/admin/book-draft — create an AI draft server-side."""
+    data = request.get_json(silent=True) or {}
+    age_group = str(data.get("age_group", "")).strip()
+    reading_level = str(data.get("reading_level", "")).strip().lower()
+    idea = str(data.get("idea", "")).strip()
+    errors = []
+    if not age_group:
+        errors.append("age_group is required.")
+    if reading_level not in {"beginner", "intermediate", "advanced"}:
+        errors.append("reading_level must be beginner, intermediate, or advanced.")
+    if not idea:
+        errors.append("idea is required.")
+    if errors:
+        return jsonify({"errors": errors}), 400
+    try:
+        provider = str(current_app.config.get("BOOK_GENERATION_PROVIDER", "nvidia")).lower()
+        if provider == "nvidia":
+            draft = generate_nvidia_book_draft(age_group, reading_level, idea, current_app.config)
+        elif provider == "gemini":
+            draft = generate_gemini_book_draft(age_group, reading_level, idea, current_app.config)
+        else:
+            return jsonify({"error": "BOOK_GENERATION_PROVIDER must be nvidia or gemini."}), 500
+        return jsonify({"draft": draft, "provider": provider}), 200
+    except (GeminiError, NvidiaError) as exc:
+        return jsonify({"error": str(exc)}), 503
+    except Exception:
+        return jsonify({"error": "Book draft generation failed."}), 500
 
 
 def upload_media():

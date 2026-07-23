@@ -51,7 +51,48 @@ schema changes.
 
 The browser records audio, uploads it to the authenticated `/api/reading-sessions/:id/pronunciation-transcript` endpoint, and then sends the returned transcript to the existing pronunciation scoring endpoint. Recordings are deleted from the server immediately after transcription.
 
-## Voice-cloned book narration (Coqui TTS)
+## Gemini story word quizzes
+
+Every book gets a quiz grounded in its title, reading level, and full story text. Gemini creates child-friendly multiple-choice questions that mix word meaning, context, and story understanding. The API validates that each answer and target word are grounded in the book before saving the quiz JSON in the existing `mini_games.content` field.
+
+Configure Gemini on the API server:
+
+```env
+GEMINI_API_KEY=your-server-side-key
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_REQUEST_TIMEOUT=45
+```
+
+Legacy static quizzes are upgraded the next time the book's mini-games are opened. If Gemini is unavailable, a grounded deterministic fallback keeps the book playable and will be replaced by Gemini once the key is configured.
+
+## NVIDIA book generation
+
+Admins can generate a book draft with `POST /api/admin/book-draft`. The API sends the request server-side to NVIDIA NIM's OpenAI-compatible chat completions endpoint; the NVIDIA key is never sent to the browser.
+
+Configure the API server:
+
+```env
+BOOK_GENERATION_PROVIDER=nvidia
+NVIDIA_API_KEY=your-server-side-nvidia-key
+NVIDIA_MODEL=openai/gpt-oss-120b
+NVIDIA_API_URL=https://integrate.api.nvidia.com/v1/chat/completions
+NVIDIA_REQUEST_TIMEOUT=60
+```
+
+Example request (with an admin JWT):
+
+```json
+POST /api/admin/book-draft
+{
+  "age_group": "6-8",
+  "reading_level": "beginner",
+  "idea": "A small cloud learns how to help a thirsty garden."
+}
+```
+
+Set `BOOK_GENERATION_PROVIDER=gemini` to keep using the existing Gemini draft generator instead.
+
+## Voice-cloned book narration (ElevenLabs)
 
 Book preview narrations are generated separately from reading sessions. A parent selects one of their ready voice profiles and requests a cached narration for that `(book, voice profile)` pair. Generated audio and source recordings are private authenticated Cloudinary resources; the API only redirects to a signed URL after an ownership check.
 
@@ -76,30 +117,15 @@ row is missing.
 Set these server environment variables (the defaults are also in `.env.example`):
 
 ```env
-TTS_MODEL_NAME=tts_models/multilingual/multi-dataset/xtts_v2
-TTS_VOICE_CLONING_METHOD=native
-TTS_DEVICE=cpu
-TTS_CACHE_DIR=/app/models/tts
-TTS_LANGUAGE=en
-TTS_MAX_CHARS_PER_CHUNK=280
-# Optional: FFMPEG_BINARY=/usr/bin/ffmpeg
+ELEVENLABS_API_KEY=your-server-side-key
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+ELEVENLABS_MAX_CHARS_PER_CHUNK=4500
+ELEVENLABS_REQUEST_TIMEOUT=120
 ```
 
-The API downloads the authenticated Cloudinary voice sample to a temporary WAV and passes it to Coqui as `speaker_wav`; Cloudinary credentials are never exposed to the browser. By default it uses XTTS-v2's native cloning. To use the voice-conversion API shown in the question with a compatible base TTS model, configure:
-
-```
-TTS_MODEL_NAME=tts_models/de/thorsten/tacotron2-DDC
-TTS_VOICE_CLONING_METHOD=vc
-```
-
-This executes Coqui's `tts_with_vc_to_file(text, speaker_wav=..., file_path=...)` for every book chunk. Coqui downloads model weights into `TTS_CACHE_DIR` on first use. Plan for several GB of persistent disk and several GB of RAM; CPU generation can take minutes for a book. A CUDA GPU makes synthesis substantially faster but needs compatible PyTorch/CUDA runtime and enough GPU memory. This is commonly too heavy for a small Railway container, so use a persistent volume and a GPU-capable worker service for production.
+When a user creates a voice profile, the API sends the private recording to ElevenLabs' Instant Voice Cloning endpoint and stores only the returned voice ID alongside the private Cloudinary sample. When a user requests a book narration, the API sends the book text to ElevenLabs in sentence-aware chunks, combines the returned MP3 files with ffmpeg, and stores the result as a private authenticated Cloudinary resource. The ElevenLabs key and Cloudinary credentials never reach the browser.
 
 This code intentionally uses a one-worker in-process thread pool per Gunicorn process because the current deployment has no queue service. Jobs are lost when a web process restarts and are not coordinated across replicas. For production/scale, move `app.controllers.book_narration_controller._generate_narration` to a durable Celery or RQ worker backed by Redis, while retaining the same `BookNarration` status polling API.
 
-For CPU-only development environments, install the PyTorch runtime from its CPU wheel index after installing requirements:
-
-```bash
-python -m pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu
-```
-
-After changing dependencies, restart the Flask process. The first actual narration then downloads the selected Coqui model weights into `TTS_CACHE_DIR`; this is separate from installing the Python package.
+After changing API environment variables, restart the Flask process. Existing voice profiles without an ElevenLabs ID are cloned lazily the first time their owner requests a narration.

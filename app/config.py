@@ -98,21 +98,36 @@ class Config:
     CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
     CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
+    # Keep this server-side. Never expose the ElevenLabs key through Next.js
+    # public environment variables or return it from an API response.
+    ELEVENLABS_API_KEY = _env_value("ELEVENLABS_API_KEY")
+    ELEVENLABS_MODEL_ID = _env_value("ELEVENLABS_MODEL_ID", default="eleven_multilingual_v2")
+    ELEVENLABS_OUTPUT_FORMAT = _env_value("ELEVENLABS_OUTPUT_FORMAT", default="mp3_44100_128")
+    ELEVENLABS_LANGUAGE_CODE = _env_value("ELEVENLABS_LANGUAGE_CODE")
+    ELEVENLABS_MAX_CHARS_PER_CHUNK = int(_env_value("ELEVENLABS_MAX_CHARS_PER_CHUNK", default="4500"))
+    ELEVENLABS_REQUEST_TIMEOUT = int(_env_value("ELEVENLABS_REQUEST_TIMEOUT", default="120"))
+    FFMPEG_BINARY = _env_value("FFMPEG_BINARY")
+
+    GEMINI_API_KEY = _env_value("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    GEMINI_MODEL = _env_value("GEMINI_MODEL", default="gemini-2.5-flash")
+    GEMINI_REQUEST_TIMEOUT = int(_env_value("GEMINI_REQUEST_TIMEOUT", default="45"))
+
+    # Book drafts use NVIDIA NIM by default. Keep all AI keys server-side.
+    BOOK_GENERATION_PROVIDER = _env_value("BOOK_GENERATION_PROVIDER", default="nvidia").lower()
+    NVIDIA_API_KEY = _env_value("NVIDIA_API_KEY", "NVAPI_KEY")
+    NVIDIA_API_URL = _env_value(
+        "NVIDIA_API_URL",
+        default="https://integrate.api.nvidia.com/v1/chat/completions",
+    )
+    NVIDIA_MODEL = _env_value("NVIDIA_MODEL", default="openai/gpt-oss-120b")
+    # Keep the upstream AI call below the Gunicorn/platform request window so
+    # clients receive a useful error instead of waiting until the connection
+    # is terminated by the deployment proxy.
+    NVIDIA_REQUEST_TIMEOUT = int(_env_value("NVIDIA_REQUEST_TIMEOUT", default="120"))
+
     VOSK_MODEL_PATH = os.getenv(
         "VOSK_MODEL_PATH",
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vosk-model-small-en-us-0.15"),
     )
   
-    TTS_MODEL_NAME = os.getenv(
-        "TTS_MODEL_NAME",
-        os.getenv("XTTS_MODEL_NAME", "tts_models/multilingual/multi-dataset/xtts_v2"),
-    )
-    TTS_VOICE_CLONING_METHOD = os.getenv("TTS_VOICE_CLONING_METHOD", "native").lower()
-    TTS_DEVICE = os.getenv("TTS_DEVICE", os.getenv("XTTS_DEVICE", "cpu"))
-    TTS_CACHE_DIR = os.getenv(
-        "TTS_CACHE_DIR",
-        os.getenv("XTTS_CACHE_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "tts")),
-    )
-    TTS_LANGUAGE = os.getenv("TTS_LANGUAGE", os.getenv("XTTS_LANGUAGE", "en"))
-    TTS_MAX_CHARS_PER_CHUNK = int(os.getenv("TTS_MAX_CHARS_PER_CHUNK", os.getenv("XTTS_MAX_CHARS_PER_CHUNK", "280")))
     MAX_CONTENT_LENGTH = 25 * 1024 * 1024

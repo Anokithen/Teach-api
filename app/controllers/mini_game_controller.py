@@ -24,4 +24,7 @@ def get_mini_game(game_id):
     game = db.session.get(MiniGame, game_id)
     if not game:
         return jsonify({"error": "Mini-game not found."}), 404
+    if game.game_type == "quiz" and create_default_mini_games(game.book):
+        db.session.commit()
+        game = db.session.get(MiniGame, game_id)
     return jsonify({"mini_game": game.to_dict(include_content=True)}), 200

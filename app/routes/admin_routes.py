@@ -91,6 +91,12 @@ def create_book():
     return ctrl.create_book()
 
 
+@admin_bp.route("/book-draft", methods=["POST"])
+@admin_required
+def generate_book_draft():
+    return ctrl.generate_book_draft_for_admin()
+
+
 @admin_bp.route("/book-media", methods=["POST"])
 @admin_required
 def upload_book_media():

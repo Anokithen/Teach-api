@@ -4,6 +4,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
 from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy import inspect, text
 
 from app.config import Config
 from app.extensions import db, jwt
@@ -29,6 +30,8 @@ def create_app():
         with app.app_context():
             try:
                 db.create_all()
+                _ensure_voice_profile_schema()
+                _ensure_book_schema()
             except Exception as exc:  # pragma: no cover - startup diagnostics only
                 app.logger.error("Could not create database tables: %s", exc)
 
@@ -88,3 +91,35 @@ def create_app():
         return jsonify({"error": "The recording must be smaller than 25 MB."}), 413
 
     return app
+
+
+def _ensure_voice_profile_schema():
+    """Add the ElevenLabs ID to databases created before voice cloning support."""
+    inspector = inspect(db.engine)
+    if not inspector.has_table("voice_profiles"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("voice_profiles")}
+    if "elevenlabs_voice_id" in columns:
+        return
+    db.session.execute(
+        text("ALTER TABLE voice_profiles ADD COLUMN elevenlabs_voice_id VARCHAR(255) NULL")
+    )
+    db.session.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_voice_profiles_elevenlabs_voice_id "
+            "ON voice_profiles (elevenlabs_voice_id)"
+        )
+    )
+    db.session.commit()
+
+
+def _ensure_book_schema():
+    """Add book illustration URLs to databases created before book galleries."""
+    inspector = inspect(db.engine)
+    if not inspector.has_table("books"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("books")}
+    if "image_urls" in columns:
+        return
+    db.session.execute(text("ALTER TABLE books ADD COLUMN image_urls JSON NULL"))
+    db.session.commit()

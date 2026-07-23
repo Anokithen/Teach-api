@@ -20,7 +20,7 @@ from app.services.cloudinary_service import (
     signed_voice_delivery_url,
     upload_book_narration,
 )
-from app.services.tts_service import TTSError, synthesize_narration
+from app.services.elevenlabs_service import ElevenLabsError, clone_voice_from_url, synthesize_narration
 
 
 # Simple deployment-sized queue. Replace with Celery/RQ before running multiple
@@ -43,13 +43,22 @@ def _generate_narration(app, narration_id):
                 return
             book, profile = narration.book, narration.voice_profile
             if not book or not profile or not book.text_content:
-                raise TTSError("The book text or voice profile is no longer available.")
-            reference_url = signed_voice_delivery_url(
-                profile.cloudinary_public_id, profile.voice_sample_url, app.config
-            )
-            with tempfile.NamedTemporaryFile(prefix="teachalike-narration-", suffix=".wav", delete=False) as output:
+                raise ElevenLabsError("The book text or voice profile is no longer available.")
+            if not profile.elevenlabs_voice_id:
+                reference_url = signed_voice_delivery_url(
+                    profile.cloudinary_public_id, profile.voice_sample_url, app.config
+                )
+                profile.elevenlabs_voice_id = clone_voice_from_url(
+                    reference_url,
+                    app.config,
+                    profile_label=profile.label,
+                    owner_name=profile.parent.name if profile.parent else None,
+                    profile_id=profile.id,
+                )
+                db.session.commit()
+            with tempfile.NamedTemporaryFile(prefix="teachalike-narration-", suffix=".mp3", delete=False) as output:
                 output_path = output.name
-            synthesize_narration(book.text_content, reference_url, output_path, app.config)
+            synthesize_narration(book.text_content, profile.elevenlabs_voice_id, output_path, app.config)
             with open(output_path, "rb") as audio_file:
                 audio_url, public_id = upload_book_narration(
                     audio_file,
@@ -65,7 +74,7 @@ def _generate_narration(app, narration_id):
             narration.error_message = None
             narration.status = STATUS_READY
             db.session.commit()
-        except TTSError as exc:
+        except ElevenLabsError as exc:
             db.session.rollback()
             narration = db.session.get(BookNarration, narration_id)
             if narration:

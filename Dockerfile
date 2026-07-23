@@ -11,10 +11,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# Coqui keeps PyTorch optional. Explicit CPU wheels keep a CPU Railway service
-# from pulling CUDA packages; use a separate GPU image/runtime when XTTS_DEVICE=cuda.
-RUN pip install --no-cache-dir torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Keep the large offline language model out of Git while ensuring every Railway
 # image has the recogniser it needs.

@@ -5,6 +5,7 @@ from app.extensions import db
 from app.models.voice_profile_model import VoiceProfile, STATUS_READY
 from app.middleware import can_access_voice_profile, owns_voice_profile
 from app.services.cloudinary_service import ALLOWED_EXTENSIONS, delete_voice_sample, signed_voice_delivery_url, upload_voice_sample
+from app.services.elevenlabs_service import ElevenLabsError, clone_voice, delete_voice
 
 
 def create_voice_profile():
@@ -16,7 +17,12 @@ def create_voice_profile():
         return jsonify({"errors": ["Only MP3, WAV, WebM, OGG, M4A, and MP4 audio files are accepted."]}), 400
 
     data = request.form
+    label = str(data.get("label") or "").strip()
+    if len(label) > 80:
+        return jsonify({"errors": ["label must be 80 characters or fewer."]}), 400
 
+    voice_profile = None
+    elevenlabs_voice_id = None
     try:
         voice_sample_url, public_id = upload_voice_sample(
             sample,
@@ -24,13 +30,25 @@ def create_voice_profile():
             current_app.config,
             owner_name=current_user.name,
         )
+        # Cloudinary consumes the upload stream. Rewind it before sending the
+        # same sample to ElevenLabs for Instant Voice Cloning.
+        sample.stream.seek(0)
+        elevenlabs_voice_id = clone_voice(
+            sample.stream,
+            sample.filename,
+            sample.mimetype,
+            current_app.config,
+            profile_label=label,
+            owner_name=current_user.name,
+        )
         voice_profile = VoiceProfile(
             parent_id=current_user.id,
-            label=str(data.get("label")).strip() if data.get("label") else None,
+            label=label or None,
             voice_sample_url=voice_sample_url,
             cloudinary_public_id=public_id,
-            # Cloudinary's upload call has completed successfully at this point,
-            # so the sample is immediately available for playback and sessions.
+            elevenlabs_voice_id=elevenlabs_voice_id,
+            # Both the private source sample and the ElevenLabs clone are ready
+            # before the profile is exposed to narration controls.
             status=STATUS_READY,
         )
         db.session.add(voice_profile)
@@ -38,14 +56,29 @@ def create_voice_profile():
 
         return jsonify(
             {
-                "message": "Voice recording uploaded securely.",
+                "message": "Voice profile cloned securely and ready for book narration.",
                 "voice_profile": voice_profile.to_dict(),
             }
         ), 201
-    except RuntimeError as exc:
+    except (RuntimeError, ElevenLabsError) as exc:
+        if 'public_id' in locals():
+            try:
+                delete_voice_sample(public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not clean up failed voice-profile upload")
         return jsonify({"error": str(exc)}), 503
     except Exception:
         db.session.rollback()
+        if elevenlabs_voice_id:
+            try:
+                delete_voice(elevenlabs_voice_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not clean up failed ElevenLabs voice clone")
+        if voice_profile is None and 'public_id' in locals():
+            try:
+                delete_voice_sample(public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not clean up failed voice-profile upload")
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
@@ -102,6 +135,7 @@ def delete_voice_profile(voice_profile_id):
         return jsonify({"error": "Voice profile not found."}), 404
 
     try:
+        delete_voice(profile.elevenlabs_voice_id, current_app.config)
         delete_voice_sample(profile.cloudinary_public_id, current_app.config)
         db.session.delete(profile)
         db.session.commit()
