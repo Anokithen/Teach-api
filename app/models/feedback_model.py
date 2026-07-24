@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 FEEDBACK_TYPES = ("praise", "correction", "tip")
 
@@ -23,5 +23,5 @@ class Feedback(db.Model):
             "feedback_text": self.feedback_text,
             "feedback_type": self.feedback_type,
             "audio_url": self.audio_url,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": utc_isoformat(self.created_at),
         }

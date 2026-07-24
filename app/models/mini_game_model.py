@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 
 class MiniGame(db.Model):
@@ -23,7 +23,7 @@ class MiniGame(db.Model):
             "book_id": self.book_id,
             "game_type": self.game_type,
             "difficulty": self.difficulty,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": utc_isoformat(self.created_at),
         }
         if include_content:
             data["rules"] = self.rules

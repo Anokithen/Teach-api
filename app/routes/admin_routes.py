@@ -1,6 +1,7 @@
 from flask import Blueprint
 from app.controllers import admin_controller as ctrl
 from app.middleware import admin_required
+from app.models.parent_model import ROLE_PARENT, ROLE_TEACHER
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
@@ -28,19 +29,19 @@ def get_parent(parent_id):
 @admin_bp.route("/parents/<int:parent_id>/ban", methods=["PATCH"])
 @admin_required
 def ban_parent(parent_id):
-    return ctrl.ban_account(parent_id)
+    return ctrl.ban_account(parent_id, ROLE_PARENT)
 
 
 @admin_bp.route("/parents/<int:parent_id>/unban", methods=["PATCH"])
 @admin_required
 def unban_parent(parent_id):
-    return ctrl.unban_account(parent_id)
+    return ctrl.unban_account(parent_id, ROLE_PARENT)
 
 
 @admin_bp.route("/parents/<int:parent_id>", methods=["DELETE"])
 @admin_required
 def delete_parent(parent_id):
-    return ctrl.delete_account(parent_id)
+    return ctrl.delete_account(parent_id, ROLE_PARENT)
 
 
 # --- Teachers ------------------------------------------------------------
@@ -60,19 +61,19 @@ def register_teacher():
 @admin_bp.route("/teachers/<int:teacher_id>/ban", methods=["PATCH"])
 @admin_required
 def ban_teacher(teacher_id):
-    return ctrl.ban_account(teacher_id)
+    return ctrl.ban_account(teacher_id, ROLE_TEACHER)
 
 
 @admin_bp.route("/teachers/<int:teacher_id>/unban", methods=["PATCH"])
 @admin_required
 def unban_teacher(teacher_id):
-    return ctrl.unban_account(teacher_id)
+    return ctrl.unban_account(teacher_id, ROLE_TEACHER)
 
 
 @admin_bp.route("/teachers/<int:teacher_id>", methods=["DELETE"])
 @admin_required
 def delete_teacher(teacher_id):
-    return ctrl.delete_account(teacher_id)
+    return ctrl.delete_account(teacher_id, ROLE_TEACHER)
 
 
 # --- Other admins (bootstrap additional admin accounts) -------------------

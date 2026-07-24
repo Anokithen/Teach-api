@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 STATUS_PROCESSING = "processing"
 STATUS_READY = "ready"
@@ -36,5 +36,5 @@ class VoiceProfile(db.Model):
             "has_cloned_voice": bool(self.elevenlabs_voice_id),
             "owner_name": self.parent.name if self.parent else None,
             "status": self.status,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": utc_isoformat(self.created_at),
         }

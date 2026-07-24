@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 
 class GameResult(db.Model):
@@ -17,5 +17,5 @@ class GameResult(db.Model):
             "child_id": self.child_id,
             "game_id": self.game_id,
             "score": self.score,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": utc_isoformat(self.completed_at),
         }

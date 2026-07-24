@@ -217,9 +217,11 @@ def get_parent(parent_id):
     return jsonify({"parent": data}), 200
 
 
-def _get_target_account(account_id):
+def _get_target_account(account_id, expected_role=None):
     account = db.session.get(Parent, account_id)
     if not account:
+        return None, (jsonify({"error": "Account not found."}), 404)
+    if expected_role and account.role != expected_role:
         return None, (jsonify({"error": "Account not found."}), 404)
     if account.id == current_user.id:
         return None, (jsonify({"error": "You cannot perform this action on your own account."}), 400)
@@ -228,9 +230,9 @@ def _get_target_account(account_id):
     return account, None
 
 
-def ban_account(account_id):
+def ban_account(account_id, expected_role=None):
     """PATCH /api/admin/parents/<id>/ban or /api/admin/teachers/<id>/ban"""
-    account, error_response = _get_target_account(account_id)
+    account, error_response = _get_target_account(account_id, expected_role)
     if error_response:
         return error_response
 
@@ -243,9 +245,9 @@ def ban_account(account_id):
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
-def unban_account(account_id):
+def unban_account(account_id, expected_role=None):
     """PATCH /api/admin/parents/<id>/unban or /api/admin/teachers/<id>/unban"""
-    account, error_response = _get_target_account(account_id)
+    account, error_response = _get_target_account(account_id, expected_role)
     if error_response:
         return error_response
 
@@ -258,13 +260,13 @@ def unban_account(account_id):
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
-def delete_account(account_id):
+def delete_account(account_id, expected_role=None):
     """DELETE /api/admin/parents/<id> or /api/admin/teachers/<id>
 
     Deleting a parent cascades to their children and voice profiles, same as
     a parent deleting their own account.
     """
-    account, error_response = _get_target_account(account_id)
+    account, error_response = _get_target_account(account_id, expected_role)
     if error_response:
         return error_response
 

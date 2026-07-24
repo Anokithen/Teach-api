@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 
 class Book(db.Model):
@@ -34,7 +34,7 @@ class Book(db.Model):
             "cover_image_url": self.cover_image_url,
             "video_url": self.video_url,
             "image_urls": self.image_urls or [],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": utc_isoformat(self.created_at),
         }
         if include_content:
             data["text_content"] = self.text_content

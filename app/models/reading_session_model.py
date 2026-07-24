@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 
 
 class ReadingSession(db.Model):
@@ -26,8 +26,8 @@ class ReadingSession(db.Model):
             "child_id": self.child_id,
             "book_id": self.book_id,
             "voice_profile_id": self.voice_profile_id,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "started_at": utc_isoformat(self.started_at),
+            "completed_at": utc_isoformat(self.completed_at),
             "accuracy_score": self.accuracy_score,
             "progress_log": self.progress_log or [],
             "is_complete": self.completed_at is not None,

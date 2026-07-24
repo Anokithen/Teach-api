@@ -1,5 +1,5 @@
 from app.extensions import db
-from app.utils import utc_now
+from app.utils import utc_isoformat, utc_now
 from werkzeug.security import generate_password_hash, check_password_hash
 
 ROLE_PARENT = "parent"
@@ -58,5 +58,5 @@ class Parent(db.Model):
             "email": self.email,
             "role": self.role,
             "is_banned": self.is_banned,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": utc_isoformat(self.created_at),
         }
