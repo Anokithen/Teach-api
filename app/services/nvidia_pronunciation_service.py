@@ -40,10 +40,10 @@ def _json_from_content(content):
         return json.loads(text[start : end + 1])
 
 
-def score_pronunciation(expected_sentence, spoken_transcript, config):
+def score_pronunciation(expected_sentence, spoken_transcript, config, model=None):
     """Ask NVIDIA to score transcript fidelity, returning (score, feedback)."""
     url = str(config.get("NVIDIA_API_URL") or "").strip()
-    model = str(config.get("NVIDIA_MODEL") or "openai/gpt-oss-120b").strip()
+    model = str(model or config.get("NVIDIA_MODEL") or "openai/gpt-oss-120b").strip()
     if not url:
         raise NvidiaPronunciationError("NVIDIA pronunciation scoring URL is not configured.")
 

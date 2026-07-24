@@ -112,8 +112,13 @@ class Config:
     GEMINI_MODEL = _env_value("GEMINI_MODEL", default="gemini-2.5-flash")
     GEMINI_REQUEST_TIMEOUT = int(_env_value("GEMINI_REQUEST_TIMEOUT", default="45"))
 
-    # Book drafts use NVIDIA NIM by default. Keep all AI keys server-side.
-    BOOK_GENERATION_PROVIDER = _env_value("BOOK_GENERATION_PROVIDER", default="nvidia").lower()
+    # Groq model discovery and chat calls stay server-side. NVIDIA/Gemini remain
+    # available as legacy provider overrides for existing deployments.
+    BOOK_GENERATION_PROVIDER = _env_value("BOOK_GENERATION_PROVIDER", default="groq").lower()
+    GROQ_API_KEY = _env_value("GROQ_API_KEY")
+    GROQ_API_URL = _env_value("GROQ_API_URL", default="https://api.groq.com/openai/v1")
+    GROQ_MODEL = _env_value("GROQ_MODEL", default="openai/gpt-oss-120b")
+    GROQ_REQUEST_TIMEOUT = int(_env_value("GROQ_REQUEST_TIMEOUT", default="60"))
     NVIDIA_API_KEY = _env_value("NVIDIA_API_KEY", "NVAPI_KEY")
     NVIDIA_API_URL = _env_value(
         "NVIDIA_API_URL",

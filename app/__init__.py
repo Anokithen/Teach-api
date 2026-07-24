@@ -8,12 +8,14 @@ from sqlalchemy import inspect, text
 
 from app.config import Config
 from app.extensions import db, jwt
+from app.api_log import setup_api_request_logging
 from app.routes import register_blueprints
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    setup_api_request_logging(app)
     CORS(
         app,
         resources={r"/api/*": {"origins": app.config["FRONTEND_ORIGINS"]}},

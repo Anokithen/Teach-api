@@ -9,6 +9,7 @@ from app.routes.leaderboard_routes import leaderboard_bp
 from app.routes.sync_routes import sync_bp
 from app.routes.admin_routes import admin_bp
 from app.routes.book_narration_routes import book_narration_bp
+from app.routes.ai_routes import ai_bp
 
 
 def register_blueprints(app):
@@ -23,3 +24,4 @@ def register_blueprints(app):
     app.register_blueprint(sync_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(book_narration_bp)
+    app.register_blueprint(ai_bp)

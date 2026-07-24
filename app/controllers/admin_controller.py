@@ -9,6 +9,7 @@ from app.models.book_model import Book
 from app.services.book_games import create_default_mini_games
 from app.services.cloudinary_service import upload_book_media
 from app.services.gemini_service import GeminiError, generate_book_draft as generate_gemini_book_draft
+from app.services.groq_service import GroqError, generate_book_draft as generate_groq_book_draft
 from app.services.nvidia_service import NvidiaError, generate_book_draft as generate_nvidia_book_draft
 
 
@@ -133,6 +134,7 @@ def generate_book_draft_for_admin():
     age_group = str(data.get("age_group", "")).strip()
     reading_level = str(data.get("reading_level", "")).strip().lower()
     idea = str(data.get("idea", "")).strip()
+    model = str(data.get("model") or "").strip()
     errors = []
     if not age_group:
         errors.append("age_group is required.")
@@ -140,18 +142,24 @@ def generate_book_draft_for_admin():
         errors.append("reading_level must be beginner, intermediate, or advanced.")
     if not idea:
         errors.append("idea is required.")
+    if len(model) > 200:
+        errors.append("model must be 200 characters or fewer.")
     if errors:
         return jsonify({"errors": errors}), 400
     try:
         provider = str(current_app.config.get("BOOK_GENERATION_PROVIDER", "nvidia")).lower()
-        if provider == "nvidia":
+        if provider == "groq":
+            draft = generate_groq_book_draft(
+                age_group, reading_level, idea, current_app.config, model=model or None
+            )
+        elif provider == "nvidia":
             draft = generate_nvidia_book_draft(age_group, reading_level, idea, current_app.config)
         elif provider == "gemini":
             draft = generate_gemini_book_draft(age_group, reading_level, idea, current_app.config)
         else:
-            return jsonify({"error": "BOOK_GENERATION_PROVIDER must be nvidia or gemini."}), 500
+            return jsonify({"error": "BOOK_GENERATION_PROVIDER must be groq, nvidia, or gemini."}), 500
         return jsonify({"draft": draft, "provider": provider}), 200
-    except (GeminiError, NvidiaError) as exc:
+    except (GeminiError, GroqError, NvidiaError) as exc:
         return jsonify({"error": str(exc)}), 503
     except Exception:
         return jsonify({"error": "Book draft generation failed."}), 500

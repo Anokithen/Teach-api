@@ -14,10 +14,7 @@ from app.models.reading_session_model import ReadingSession
 from app.middleware import child_belongs_to_current_parent, voice_profile_belongs_to_current_parent
 from app.controllers.game_result_controller import _award_leaderboard_points
 from app.services.nvidia_speech_service import NvidiaSpeechError, transcribe_audio
-from app.services.nvidia_pronunciation_service import (
-    NvidiaPronunciationError,
-    score_pronunciation,
-)
+from app.services.groq_service import GroqError, score_pronunciation as score_groq_pronunciation
 
 
 PRONUNCIATION_POINTS = 10
@@ -185,7 +182,6 @@ def check_pronunciation(session_id):
         return jsonify({"error": "A spoken transcript is required."}), 400
     if len(transcript) > 1000:
         return jsonify({"error": "The spoken transcript is too long."}), 400
-
     sentences = _book_sentences(session.book.text_content if session.book else None)
     if sentence_index >= len(sentences):
         return jsonify({"error": "That sentence does not exist in this book."}), 400
@@ -195,16 +191,17 @@ def check_pronunciation(session_id):
     if not expected or not spoken:
         return jsonify({"error": "We could not compare that reading. Please try again."}), 400
 
-    scoring_provider = "nvidia"
+    selected_model = str(current_app.config.get("GROQ_MODEL") or "").strip() or None
+    scoring_provider = "groq"
     scoring_feedback = None
     try:
-        score_percent, scoring_feedback = score_pronunciation(
+        score_percent, scoring_feedback = score_groq_pronunciation(
             sentences[sentence_index], transcript.strip(), current_app.config
         )
         score = score_percent / 100
-    except NvidiaPronunciationError:
+    except GroqError:
         # Keep the test usable when the external scoring provider is briefly
-        # unavailable; transcription still came from NVIDIA ASR above.
+        # unavailable; transcription still came from the configured ASR service.
         score = SequenceMatcher(None, expected, spoken).ratio()
         scoring_provider = "local-fallback"
     correct = score >= PRONUNCIATION_PASS_SCORE
@@ -227,6 +224,7 @@ def check_pronunciation(session_id):
                 "accuracy": round(score * 100),
                 "awarded_points": points_awarded,
                 "scoring_provider": scoring_provider,
+                "scoring_model": selected_model,
             }
         )
         session.progress_log = log
@@ -247,6 +245,7 @@ def check_pronunciation(session_id):
                 "points_awarded": points_awarded,
                 "already_awarded": already_awarded,
                 "scoring_provider": scoring_provider,
+                "scoring_model": selected_model,
                 "feedback": scoring_feedback,
                 "message": message,
             }
