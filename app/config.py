@@ -87,12 +87,12 @@ class Config:
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))
     )
     _frontend_origins = _env_value("FRONTEND_ORIGINS")
-   
+    _frontend_origin_values = (_frontend_origins or "*").split(",")
     FRONTEND_ORIGINS = [
-        origin.strip()
-        for origin in (_frontend_origins or "*").split(",")
+        origin.strip().rstrip("/")
+        for origin in _frontend_origin_values
         if origin.strip()
-    ]
+    ] or ["*"]
     
     CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
     CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")

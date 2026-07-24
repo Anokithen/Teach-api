@@ -30,6 +30,15 @@ Railway. A Railway MySQL service can be connected by referencing its native
 `MYSQL_URL` (or its `MYSQL*` variables); the API also accepts the existing
 `DB_*` variables. Apply the SQL files in `migrations/` before serving traffic.
 
+For a Vercel frontend, set `FRONTEND_ORIGINS` on the Railway API service to the
+exact deployed frontend origin, for example
+`https://your-project.vercel.app`. Multiple origins can be comma-separated;
+custom domains and Vercel preview URLs may be listed separately. The API
+accepts a trailing slash, but the value should not include an `/api` path.
+Configure the frontend's API base URL to the public Railway API URL, including
+the `/api` prefix only if the frontend's requests are built from that base.
+The API process can be checked at `https://<railway-domain>/health`.
+
 Important: MySQL service variables are not automatically visible to another
 Railway service. On the API service, add `MYSQL_URL` with a Railway service
 reference such as `${{MySQL.MYSQL_URL}}`, or add references for each `MYSQL*`

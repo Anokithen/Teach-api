@@ -64,6 +64,10 @@ def create_app():
 
     register_blueprints(app)
 
+    @app.get("/health")
+    def health_check():
+        return jsonify({"status": "ok"}), 200
+
     @app.errorhandler(OperationalError)
     def handle_operational_error(err):
         db.session.rollback()
