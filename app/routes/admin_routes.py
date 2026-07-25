@@ -92,6 +92,18 @@ def create_book():
     return ctrl.create_book()
 
 
+@admin_bp.route("/books/<int:book_id>", methods=["PATCH"])
+@admin_required
+def update_book(book_id):
+    return ctrl.update_book(book_id)
+
+
+@admin_bp.route("/books/<int:book_id>", methods=["DELETE"])
+@admin_required
+def delete_book(book_id):
+    return ctrl.delete_book(book_id)
+
+
 @admin_bp.route("/book-draft", methods=["POST"])
 @admin_required
 def generate_book_draft():

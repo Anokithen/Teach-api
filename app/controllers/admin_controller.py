@@ -6,6 +6,7 @@ from app.extensions import db
 from app.models.parent_model import Parent, ROLE_PARENT, ROLE_TEACHER, ROLE_ADMIN, VALID_ROLES
 from app.models.child_model import Child
 from app.models.book_model import Book
+from app.models.reading_session_model import ReadingSession
 from app.services.book_games import create_default_mini_games
 from app.services.cloudinary_service import upload_book_media
 from app.services.gemini_service import GeminiError, generate_book_draft as generate_gemini_book_draft
@@ -123,6 +124,79 @@ def create_book():
             "book": book.to_dict(include_content=True),
             "mini_games": [game.to_dict(include_content=True) for game in book.mini_games],
         }), 201
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def _validate_book_payload(data):
+    """Validate the shared fields used when creating or editing a book."""
+    errors = []
+    title = str(data.get("title", "")).strip()
+    age_group = str(data.get("age_group", "")).strip()
+    reading_level = str(data.get("reading_level", "")).strip().lower()
+    image_urls = data.get("image_urls") or []
+
+    if not title:
+        errors.append("title is required.")
+    if not age_group:
+        errors.append("age_group is required.")
+    if reading_level not in {"beginner", "intermediate", "advanced"}:
+        errors.append("reading_level must be beginner, intermediate, or advanced.")
+    if not isinstance(image_urls, list) or len(image_urls) > 8 or any(
+        not isinstance(url, str) or not url.strip().startswith(("http://", "https://"))
+        for url in image_urls
+    ):
+        errors.append("image_urls must contain up to 8 HTTP(S) image URLs.")
+
+    return errors, {
+        "title": title,
+        "age_group": age_group,
+        "reading_level": reading_level,
+        "text_content": str(data.get("text_content", "")).strip() or None,
+        "content_url": str(data.get("content_url", "")).strip() or None,
+        "cover_image_url": str(data.get("cover_image_url", "")).strip() or None,
+        "video_url": str(data.get("video_url", "")).strip() or None,
+        "image_urls": [url.strip() for url in image_urls] if isinstance(image_urls, list) else [],
+    }
+
+
+def update_book(book_id):
+    """PATCH /api/admin/books/<id> — update catalog metadata and media URLs."""
+    book = db.session.get(Book, book_id)
+    if not book:
+        return jsonify({"error": "Book not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+    errors, values = _validate_book_payload(data)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    try:
+        for field, value in values.items():
+            setattr(book, field, value)
+        db.session.commit()
+        return jsonify({
+            "message": "Book updated successfully.",
+            "book": book.to_dict(include_content=True),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+def delete_book(book_id):
+    """DELETE /api/admin/books/<id> — remove a book without orphaning sessions."""
+    book = db.session.get(Book, book_id)
+    if not book:
+        return jsonify({"error": "Book not found."}), 404
+    if ReadingSession.query.filter_by(book_id=book_id).first():
+        return jsonify({"error": "This book cannot be deleted because it has reading sessions."}), 409
+
+    try:
+        db.session.delete(book)
+        db.session.commit()
+        return jsonify({"message": "Book deleted successfully."}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
