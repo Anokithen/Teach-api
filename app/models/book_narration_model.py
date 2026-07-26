@@ -13,6 +13,7 @@ class BookNarration(db.Model):
 
     __tablename__ = "book_narrations"
     __table_args__ = (
+        db.UniqueConstraint("book_id", "voice_profile_id", name="uq_book_voice_narration"),
         db.Index("ix_book_narrations_book_voice", "book_id", "voice_profile_id"),
     )
 

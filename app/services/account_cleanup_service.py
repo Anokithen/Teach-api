@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 
 from app.services.cloudinary_service import (
-    delete_asset,
     delete_authenticated_audio,
     delete_profile_image,
 )
@@ -29,26 +28,10 @@ def collect_account_asset_refs(account):
         audio.append(profile.cloudinary_public_id)
         elevenlabs.append(profile.elevenlabs_voice_id)
         audio.extend(narration.cloudinary_public_id for narration in list(profile.narrations or []))
-    from app.models.asset_model import Asset, STATUS_CLEANUP_FAILED
-
-    assets = [
-        {
-            "public_id": item.cloudinary_public_id,
-            "resource_type": item.cloudinary_resource_type,
-            "delivery_type": item.cloudinary_delivery_type,
-        }
-        for item in Asset.query.filter(Asset.owner_user_id == account.id)
-        .filter(
-            (Asset.deleted_at.is_(None))
-            | (Asset.status == STATUS_CLEANUP_FAILED)
-        )
-        .all()
-    ]
     return {
         "profile_images": [item for item in profile_images if item],
         "audio": [item for item in audio if item],
         "elevenlabs": [item for item in elevenlabs if item],
-        "assets": assets,
     }
 
 
@@ -82,20 +65,6 @@ def delete_account_asset_refs(asset_refs, config, logger):
         delete_cloudinary(public_id, "a profile image", delete_profile_image)
     for public_id in asset_refs.get("audio", []):
         delete_cloudinary(public_id, "an audio asset", delete_authenticated_audio)
-    for asset in asset_refs.get("assets", []):
-        public_id = asset.get("public_id")
-        if not public_id or public_id in seen_cloudinary_ids:
-            continue
-        seen_cloudinary_ids.add(public_id)
-        try:
-            delete_asset(
-                public_id,
-                asset.get("resource_type") or "raw",
-                asset.get("delivery_type") or "upload",
-            )
-        except Exception as exc:
-            logger.exception("Could not delete an owned asset")
-            failures.append(exc)
     for voice_id in asset_refs.get("elevenlabs", []):
         delete_elevenlabs(voice_id, "an ElevenLabs voice clone")
 

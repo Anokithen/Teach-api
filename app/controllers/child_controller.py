@@ -5,10 +5,7 @@ from app.extensions import db
 from app.models.child_model import Child
 from app.models.parent_model import Parent, ROLE_PARENT
 from app.middleware import can_access_child
-from app.controllers import asset_controller
-from app.models.asset_model import Asset, CHILD_PROFILE_IMAGE, STATUS_DELETED
-from app.services.cloudinary_service import delete_asset, delete_profile_image
-from app.utils import utc_now
+from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
@@ -179,20 +176,25 @@ def upload_profile_image_for_child(child_id):
     child = db.session.get(Child, child_id)
     if not can_access_child(child):
         return jsonify({"error": "Child not found."}), 404
-    image, error = asset_controller._validated_file(CHILD_PROFILE_IMAGE, "image")
-    if error:
-        return error
+    image = request.files.get("profile_image")
+    if image is None or not image.filename:
+        return jsonify({"error": "A profile image is required."}), 400
     try:
-        asset_controller._save_profile(
-            image,
-            CHILD_PROFILE_IMAGE,
-            asset_controller.get_child_profile_folder(
-                current_user.id, child.id, child.name
-            ),
-            current_user.id,
-            child,
-        )
+        validate_uploaded_file(image, "image")
+        url, public_id = upload_profile_image(image, "children", child.id, current_app.config)
+        old_public_id = child.profile_image_public_id
+        child.profile_image_url = url
+        child.profile_image_public_id = public_id
+        db.session.commit()
+        if old_public_id:
+            try:
+                delete_profile_image(old_public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not delete the previous child profile image")
         return jsonify({"message": "Child profile image updated successfully.", "child": child.to_dict()}), 200
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Profile image upload failed."}), 500
@@ -202,26 +204,13 @@ def delete_profile_image_for_child(child_id):
     child = db.session.get(Child, child_id)
     if not can_access_child(child):
         return jsonify({"error": "Child not found."}), 404
-    asset = Asset.query.filter_by(
-        child_id=child.id,
-        asset_category=CHILD_PROFILE_IMAGE,
-        deleted_at=None,
-    ).first()
+    old_public_id = child.profile_image_public_id
+    child.profile_image_url = None
+    child.profile_image_public_id = None
     try:
-        if asset:
-            delete_asset(
-                asset.cloudinary_public_id,
-                asset.cloudinary_resource_type,
-                asset.cloudinary_delivery_type,
-            )
-            asset.status = STATUS_DELETED
-            asset.deleted_at = utc_now()
-            asset.active_slot = None
-        elif child.profile_image_public_id:
-            delete_profile_image(child.profile_image_public_id, current_app.config)
-        child.profile_image_url = None
-        child.profile_image_public_id = None
         db.session.commit()
+        if old_public_id:
+            delete_profile_image(old_public_id, current_app.config)
         return jsonify({"message": "Child profile image removed.", "child": child.to_dict()}), 200
     except Exception:
         db.session.rollback()
@@ -249,25 +238,15 @@ def delete_child(child_id):
     if not can_access_child(child):
         return jsonify({"error": "Child not found."}), 404
 
-    asset = Asset.query.filter_by(
-        child_id=child.id,
-        asset_category=CHILD_PROFILE_IMAGE,
-        deleted_at=None,
-    ).first()
+    public_id = child.profile_image_public_id
     try:
-        if asset:
-            delete_asset(
-                asset.cloudinary_public_id,
-                asset.cloudinary_resource_type,
-                asset.cloudinary_delivery_type,
-            )
-            asset.status = STATUS_DELETED
-            asset.deleted_at = utc_now()
-            asset.active_slot = None
-        elif child.profile_image_public_id:
-            delete_profile_image(child.profile_image_public_id, current_app.config)
         db.session.delete(child)
         db.session.commit()
+        if public_id:
+            try:
+                delete_profile_image(public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not delete the child profile image during child removal")
         return jsonify({"message": "Child profile removed successfully."}), 200
     except Exception:
         db.session.rollback()

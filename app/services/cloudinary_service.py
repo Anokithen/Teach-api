@@ -1,4 +1,5 @@
-"""Safe, normalized server-side Cloudinary operations."""
+"""Server-side Cloudinary storage for private voice recordings."""
+import re
 from uuid import uuid4
 
 # Browsers commonly record as WebM, OGG, or M4A rather than MP3/WAV.
@@ -30,26 +31,6 @@ ALLOWED_MIME_TYPES = {
         "mp4": {"audio/mp4", "video/mp4"},
     },
 }
-
-
-class CloudinaryServiceError(RuntimeError):
-    """Base exception for failures in the external asset store."""
-
-
-class CloudinaryConfigurationError(CloudinaryServiceError):
-    """Cloudinary credentials are absent or incomplete."""
-
-
-class CloudinaryUploadError(CloudinaryServiceError):
-    """An asset could not be uploaded."""
-
-
-class CloudinaryDeleteError(CloudinaryServiceError):
-    """An asset could not be deleted."""
-
-
-class CloudinaryMetadataError(CloudinaryServiceError):
-    """Asset metadata could not be read."""
 
 
 def validate_uploaded_file(file, media_type):
@@ -109,6 +90,32 @@ def _has_expected_signature(file, media_type, extension):
     return False
 
 
+def _cloudinary_segment(value, fallback):
+    """Turn a user-facing name into a safe, readable Cloudinary path segment."""
+    segment = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "")).strip("_").lower()
+    return segment or fallback
+
+
+def _owner_folder(owner_id, owner_name=None):
+    """Use the account name as the folder while retaining a safe fallback."""
+    return _cloudinary_segment(owner_name, f"account_{owner_id}")
+
+
+def book_narration_public_id(owner_id, owner_name, book_id, book_title, voice_profile_id):
+    """Return the stable path for one book rendered with one voice profile.
+
+    The voice-profile ID is part of the filename rather than another folder so
+    every profile still gets its own audio while all versions remain grouped
+    below the owner's book folder.
+    """
+    owner_folder = _owner_folder(owner_id, owner_name)
+    book_folder = _cloudinary_segment(book_title, f"book_{book_id}")
+    return (
+        f"teachalike/generated_booksaudio/{owner_folder}/{book_folder}/"
+        f"voice_profile_{voice_profile_id}"
+    )
+
+
 def _cloudinary_modules():
     """Load Cloudinary only when a Cloudinary-backed operation is used.
 
@@ -123,10 +130,10 @@ def _cloudinary_modules():
         import cloudinary.exceptions
         import cloudinary.uploader
         import cloudinary.utils
-    except ImportError:
-        raise CloudinaryConfigurationError(
-            "Asset storage support is unavailable."
-        ) from None
+    except ImportError as exc:
+        raise RuntimeError(
+            "Cloudinary support is not installed. Install the cloudinary package."
+        ) from exc
     return cloudinary
 
 
@@ -138,135 +145,57 @@ def configure_cloudinary(config):
         "api_secret": config.get("CLOUDINARY_API_SECRET"),
     }
     if not all(values.values()):
-        raise CloudinaryConfigurationError("Asset storage is not configured.")
-    try:
-        cloudinary.config(**values, secure=True)
-    except Exception:
-        raise CloudinaryConfigurationError(
-            "Asset storage configuration is invalid."
-        ) from None
+        raise RuntimeError("Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the API server.")
+    cloudinary.config(**values, secure=True)
 
 
-def _normalize_result(result, asset_folder=None, original_filename=None):
-    if not result.get("asset_id") or not result.get("public_id"):
-        raise CloudinaryUploadError("Asset storage returned incomplete metadata.")
-    secure_url = result.get("secure_url")
-    if not secure_url or not str(secure_url).startswith("https://"):
-        raise CloudinaryUploadError("Asset storage returned an invalid secure URL.")
-    return {
-        "asset_id": result.get("asset_id"),
-        "public_id": result.get("public_id"),
-        "secure_url": secure_url,
-        "resource_type": result.get("resource_type"),
-        "delivery_type": result.get("type", "upload"),
-        "format": result.get("format"),
-        "bytes": result.get("bytes"),
-        "width": result.get("width"),
-        "height": result.get("height"),
-        "duration": result.get("duration"),
-        "asset_folder": result.get("asset_folder") or asset_folder,
-        "original_filename": original_filename or result.get("original_filename"),
-    }
-
-
-def upload_asset(
-    file,
-    asset_folder,
-    resource_type="auto",
-    public_id=None,
-    overwrite=False,
-    tags=None,
-    context=None,
-    delivery_type="upload",
-):
-    """Upload an asset and return normalized metadata."""
-    from flask import current_app
-
-    if resource_type not in {"auto", "image", "video", "raw"}:
-        raise ValueError("Unsupported Cloudinary resource type.")
-    if delivery_type not in {"upload", "authenticated"}:
-        raise ValueError("Unsupported Cloudinary delivery type.")
+def upload_voice_sample(file, owner_id, config, owner_name=None):
+    extension = validate_uploaded_file(file, "audio")
     cloudinary = _cloudinary_modules()
-    configure_cloudinary(current_app.config)
-    options = {
-        "asset_folder": asset_folder,
-        "resource_type": resource_type,
-        "overwrite": bool(overwrite),
-        "invalidate": bool(overwrite),
-        "use_filename": False,
-        "unique_filename": public_id is None,
-        "type": delivery_type,
-    }
-    if public_id is not None:
-        options["public_id"] = public_id
-    if tags:
-        options["tags"] = list(tags)
-    if context:
-        options["context"] = dict(context)
-    supplied_filename = str(getattr(file, "filename", "") or "")
-    supplied_filename = supplied_filename.replace("\\", "/").rsplit("/", 1)[-1]
-    supplied_filename = supplied_filename[:255] or None
-    try:
-        return _normalize_result(
-            cloudinary.uploader.upload(file, **options),
-            asset_folder,
-            supplied_filename,
-        )
-    except CloudinaryServiceError:
-        raise
-    except Exception:
-        raise CloudinaryUploadError("Asset upload failed.") from None
-
-
-def delete_asset(public_id, resource_type, delivery_type="upload", invalidate=True):
-    """Delete one exact asset; already-missing assets are treated as deleted."""
-    from flask import current_app
-
-    cloudinary = _cloudinary_modules()
-    configure_cloudinary(current_app.config)
-    try:
-        result = cloudinary.uploader.destroy(
-            public_id,
-            resource_type=resource_type,
-            type=delivery_type,
-            invalidate=invalidate,
-        )
-        state = (result or {}).get("result")
-        if state not in {"ok", "not found"}:
-            raise CloudinaryDeleteError("Asset deletion was not confirmed.")
-        return state
-    except CloudinaryServiceError:
-        raise
-    except Exception:
-        raise CloudinaryDeleteError("Asset deletion failed.") from None
-
-
-def replace_asset(file, asset_folder, resource_type, public_id, tags=None, context=None):
-    """Upload a deterministic replacement without deleting the prior asset first."""
-    return upload_asset(
-        file,
-        asset_folder,
-        resource_type=resource_type,
-        public_id=public_id,
-        overwrite=True,
-        tags=tags,
-        context=context,
+    configure_cloudinary(config)
+    public_id = (
+        f"teachalike/users_voiceprofiles/{_owner_folder(owner_id, owner_name)}/"
+        f"{uuid4().hex}"
     )
+    result = cloudinary.uploader.upload(
+        file,
+        resource_type="video",  # Cloudinary handles audio files as video resources.
+        type="authenticated",
+        public_id=public_id,
+        format=extension,
+        overwrite=False,
+    )
+    return result["secure_url"], result["public_id"]
 
 
-def get_asset_metadata(public_id, resource_type, delivery_type="upload"):
-    """Fetch and normalize metadata for one exact Cloudinary asset."""
-    from flask import current_app
-
+def upload_book_narration(
+    file,
+    owner_id,
+    owner_name,
+    book_id,
+    book_title,
+    voice_profile_id,
+    config,
+):
+    """Store generated narration as private authenticated Cloudinary audio."""
     cloudinary = _cloudinary_modules()
-    configure_cloudinary(current_app.config)
-    try:
-        result = cloudinary.api.resource(
-            public_id, resource_type=resource_type, type=delivery_type
-        )
-        return _normalize_result(result, result.get("asset_folder"))
-    except Exception:
-        raise CloudinaryMetadataError("Asset metadata lookup failed.") from None
+    configure_cloudinary(config)
+    public_id = book_narration_public_id(
+        owner_id,
+        owner_name,
+        book_id,
+        book_title,
+        voice_profile_id,
+    )
+    result = cloudinary.uploader.upload(
+        file,
+        resource_type="video",
+        type="authenticated",
+        public_id=public_id,
+        format="mp3",
+        overwrite=False,
+    )
+    return result["secure_url"], result["public_id"]
 
 
 def find_book_narration(public_id, config):
@@ -308,7 +237,9 @@ def signed_narration_delivery_url(public_id, fallback_url, config):
 def delete_authenticated_audio(public_id, config):
     if not public_id:
         return
-    delete_asset(public_id, "video", "authenticated")
+    cloudinary = _cloudinary_modules()
+    configure_cloudinary(config)
+    cloudinary.uploader.destroy(public_id, resource_type="video", type="authenticated", invalidate=True)
 
 
 def delete_voice_sample(public_id, config):
@@ -322,19 +253,14 @@ def signed_voice_delivery_url(public_id, fallback_url, config):
         return fallback_url
     cloudinary = _cloudinary_modules()
     configure_cloudinary(config)
-    try:
-        url, _ = cloudinary.utils.cloudinary_url(
-            public_id,
-            resource_type="video",
-            type="authenticated",
-            sign_url=True,
-            secure=True,
-        )
-        return url
-    except Exception:
-        raise CloudinaryMetadataError(
-            "Asset delivery URL could not be created."
-        ) from None
+    url, _ = cloudinary.utils.cloudinary_url(
+        public_id,
+        resource_type="video",
+        type="authenticated",
+        sign_url=True,
+        secure=True,
+    )
+    return url
 
 
 def upload_book_media(file, media_type, owner_id, config):
@@ -371,4 +297,6 @@ def delete_profile_image(public_id, config):
     """Delete a previously stored public profile image."""
     if not public_id:
         return
-    delete_asset(public_id, "image")
+    cloudinary = _cloudinary_modules()
+    configure_cloudinary(config)
+    cloudinary.uploader.destroy(public_id, resource_type="image", invalidate=True)
