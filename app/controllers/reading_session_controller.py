@@ -18,13 +18,17 @@ from app.services.groq_service import GroqError, score_pronunciation as score_gr
 from app.services.cloudinary_service import validate_uploaded_file
 
 
-PRONUNCIATION_POINTS = 10
-PRONUNCIATION_PASS_SCORE = 0.8
+MAX_PRONUNCIATION_POINTS = 50
 
 
-def _book_sentences(text):
-    """Return readable sentence-sized snippets from a book's text."""
-    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+|\n+", text or "") if sentence.strip()]
+def _book_paragraphs(text):
+    """Return readable paragraph-sized snippets from a book's text."""
+    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text or "") if paragraph.strip()]
+
+
+def _points_for_accuracy(score_percent):
+    """Award up to 50 points, reducing one point for every two percent lost."""
+    return min(MAX_PRONUNCIATION_POINTS, max(0, math.ceil(score_percent / 2)))
 
 
 def _normalise_spoken_text(text):
@@ -171,7 +175,7 @@ def transcribe_pronunciation(session_id):
 
 
 def check_pronunciation(session_id):
-    """Compare browser speech-to-text with a book sentence and award 10 points once."""
+    """Compare browser speech-to-text with a book paragraph and award points once."""
     session = db.session.get(ReadingSession, session_id)
     if not _session_belongs_to_current_parent(session):
         return jsonify({"error": "Reading session not found."}), 404
@@ -179,19 +183,20 @@ def check_pronunciation(session_id):
         return jsonify({"error": "This reading session is already complete."}), 400
 
     data = request.get_json(silent=True) or {}
-    sentence_index = data.get("sentence_index")
+    # Accept the old key for clients that have not been updated yet.
+    paragraph_index = data.get("paragraph_index", data.get("sentence_index"))
     transcript = data.get("transcript")
-    if isinstance(sentence_index, bool) or not isinstance(sentence_index, int) or sentence_index < 0:
-        return jsonify({"error": "A valid sentence_index is required."}), 400
+    if isinstance(paragraph_index, bool) or not isinstance(paragraph_index, int) or paragraph_index < 0:
+        return jsonify({"error": "A valid paragraph_index is required."}), 400
     if not isinstance(transcript, str) or not transcript.strip():
         return jsonify({"error": "A spoken transcript is required."}), 400
     if len(transcript) > 1000:
         return jsonify({"error": "The spoken transcript is too long."}), 400
-    sentences = _book_sentences(session.book.text_content if session.book else None)
-    if sentence_index >= len(sentences):
-        return jsonify({"error": "That sentence does not exist in this book."}), 400
+    paragraphs = _book_paragraphs(session.book.text_content if session.book else None)
+    if paragraph_index >= len(paragraphs):
+        return jsonify({"error": "That paragraph does not exist in this book."}), 400
 
-    expected = _normalise_spoken_text(sentences[sentence_index])
+    expected = _normalise_spoken_text(paragraphs[paragraph_index])
     spoken = _normalise_spoken_text(transcript)
     if not expected or not spoken:
         return jsonify({"error": "We could not compare that reading. Please try again."}), 400
@@ -201,7 +206,7 @@ def check_pronunciation(session_id):
     scoring_feedback = None
     try:
         score_percent, scoring_feedback = score_groq_pronunciation(
-            sentences[sentence_index], transcript.strip(), current_app.config
+            paragraphs[paragraph_index], transcript.strip(), current_app.config
         )
         score = score_percent / 100
     except GroqError:
@@ -209,24 +214,25 @@ def check_pronunciation(session_id):
         # unavailable; transcription still came from the configured ASR service.
         score = SequenceMatcher(None, expected, spoken).ratio()
         scoring_provider = "local-fallback"
-    correct = score >= PRONUNCIATION_PASS_SCORE
+    accuracy_percent = round(score * 100)
+    points_for_reading = _points_for_accuracy(accuracy_percent)
     log = list(session.progress_log or [])
     already_awarded = any(
         entry.get("type") == "pronunciation_check"
-        and entry.get("sentence_index") == sentence_index
-        and entry.get("awarded_points") == PRONUNCIATION_POINTS
+        and entry.get("awarded_points", 0) > 0
+        and entry.get("paragraph_index", entry.get("sentence_index")) == paragraph_index
         for entry in log
         if isinstance(entry, dict)
     )
-    points_awarded = PRONUNCIATION_POINTS if correct and not already_awarded else 0
+    points_awarded = points_for_reading if not already_awarded else 0
 
     try:
         log.append(
             {
                 "type": "pronunciation_check",
-                "sentence_index": sentence_index,
+                "paragraph_index": paragraph_index,
                 "transcript": transcript.strip(),
-                "accuracy": round(score * 100),
+                "accuracy": accuracy_percent,
                 "awarded_points": points_awarded,
                 "scoring_provider": scoring_provider,
                 "scoring_model": selected_model,
@@ -237,16 +243,16 @@ def check_pronunciation(session_id):
             _award_leaderboard_points(session.child_id, points_awarded)
         db.session.commit()
         message = (
-            "Great reading! 10 points have been added to the leaderboard."
+            f"Great reading! {points_awarded} points have been added to the leaderboard."
             if points_awarded
-            else "Great reading! This sentence was already rewarded."
-            if correct
-            else "Keep trying — read the sentence again a little more clearly."
+            else "This paragraph was already rewarded."
+            if already_awarded
+            else "Keep trying — read the paragraph again a little more clearly."
         )
         return jsonify(
             {
-                "correct": correct,
-                "accuracy": round(score * 100),
+                "correct": accuracy_percent > 0,
+                "accuracy": accuracy_percent,
                 "points_awarded": points_awarded,
                 "already_awarded": already_awarded,
                 "scoring_provider": scoring_provider,
