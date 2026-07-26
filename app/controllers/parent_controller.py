@@ -4,6 +4,7 @@ from email_validator import validate_email, EmailNotValidError
 
 from app.extensions import db
 from app.models.parent_model import Parent
+from app.services.account_cleanup_service import delete_account_assets
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 
 
@@ -102,18 +103,14 @@ def delete_profile_image_for_current_user():
 
 def delete_me():
     parent = current_user
-    image_ids = [parent.profile_image_public_id]
-    image_ids.extend(child.profile_image_public_id for child in parent.children)
     try:
+        delete_account_assets(parent)
         db.session.delete(parent)  # cascades to children & voice_profiles
         db.session.commit()
-        for public_id in image_ids:
-            if public_id:
-                try:
-                    delete_profile_image(public_id, current_app.config)
-                except Exception:
-                    current_app.logger.exception("Could not delete a profile image during account removal")
         return jsonify({"message": "Account and all associated data deleted successfully."}), 200
+    except RuntimeError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 503
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500

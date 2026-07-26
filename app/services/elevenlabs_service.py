@@ -132,6 +132,8 @@ def delete_voice(voice_id, config):
         headers={"xi-api-key": _api_key(config)},
         timeout=int(config.get("ELEVENLABS_REQUEST_TIMEOUT", 120)),
     )
+    if response.status_code == 404:
+        return
     _raise_for_api_error(response, "delete this voice")
 
 

@@ -8,6 +8,7 @@ from app.models.child_model import Child
 from app.models.book_model import Book
 from app.models.reading_session_model import ReadingSession
 from app.services.book_games import create_default_mini_games
+from app.services.account_cleanup_service import delete_account_assets
 from app.services.cloudinary_service import upload_book_media
 from app.services.gemini_service import GeminiError, generate_book_draft as generate_gemini_book_draft
 from app.services.groq_service import GroqError, generate_book_draft as generate_groq_book_draft
@@ -345,9 +346,13 @@ def delete_account(account_id, expected_role=None):
         return error_response
 
     try:
+        delete_account_assets(account)
         db.session.delete(account)
         db.session.commit()
-        return jsonify({"message": "Account deleted successfully."}), 200
+        return jsonify({"message": "Account and all external assets deleted successfully."}), 200
+    except RuntimeError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 503
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500

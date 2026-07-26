@@ -234,12 +234,17 @@ def signed_narration_delivery_url(public_id, fallback_url, config):
     return signed_voice_delivery_url(public_id, fallback_url, config)
 
 
-def delete_voice_sample(public_id, config):
+def delete_authenticated_audio(public_id, config):
     if not public_id:
         return
     cloudinary = _cloudinary_modules()
     configure_cloudinary(config)
     cloudinary.uploader.destroy(public_id, resource_type="video", type="authenticated", invalidate=True)
+
+
+def delete_voice_sample(public_id, config):
+    """Delete a private voice sample stored as an authenticated video asset."""
+    delete_authenticated_audio(public_id, config)
 
 
 def signed_voice_delivery_url(public_id, fallback_url, config):
