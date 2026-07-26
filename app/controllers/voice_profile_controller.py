@@ -4,7 +4,7 @@ from flask_jwt_extended import current_user
 from app.extensions import db
 from app.models.voice_profile_model import VoiceProfile, STATUS_READY
 from app.middleware import can_access_voice_profile, owns_voice_profile
-from app.services.cloudinary_service import ALLOWED_EXTENSIONS, delete_voice_sample, signed_voice_delivery_url, upload_voice_sample
+from app.services.cloudinary_service import delete_voice_sample, signed_voice_delivery_url, upload_voice_sample, validate_uploaded_file
 from app.services.elevenlabs_service import ElevenLabsError, clone_voice, delete_voice
 
 
@@ -13,8 +13,10 @@ def create_voice_profile():
     sample = request.files.get("audio")
     if not sample or not sample.filename:
         return jsonify({"errors": ["A supported audio file is required."]}), 400
-    if "." not in sample.filename or sample.filename.rsplit(".", 1)[1].lower() not in ALLOWED_EXTENSIONS:
-        return jsonify({"errors": ["Only MP3, WAV, WebM, OGG, M4A, and MP4 audio files are accepted."]}), 400
+    try:
+        validate_uploaded_file(sample, "audio")
+    except ValueError as exc:
+        return jsonify({"errors": [str(exc)]}), 400
 
     data = request.form
     label = str(data.get("label") or "").strip()

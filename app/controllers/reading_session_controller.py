@@ -15,6 +15,7 @@ from app.middleware import child_belongs_to_current_parent, voice_profile_belong
 from app.controllers.game_result_controller import _award_leaderboard_points
 from app.services.nvidia_speech_service import NvidiaSpeechError, transcribe_audio
 from app.services.groq_service import GroqError, score_pronunciation as score_groq_pronunciation
+from app.services.cloudinary_service import validate_uploaded_file
 
 
 PRONUNCIATION_POINTS = 10
@@ -156,6 +157,10 @@ def transcribe_pronunciation(session_id):
     recording = request.files.get("audio")
     if recording is None or not recording.filename:
         return jsonify({"error": "A microphone recording is required."}), 400
+    try:
+        validate_uploaded_file(recording, "audio")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     try:
         transcript = transcribe_audio(recording)
         if not transcript:
