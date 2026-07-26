@@ -22,8 +22,16 @@ MAX_PRONUNCIATION_POINTS = 50
 
 
 def _book_paragraphs(text):
-    """Return readable paragraph-sized snippets from a book's text."""
-    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text or "") if paragraph.strip()]
+    """Return reading paragraphs made from six sentences each."""
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text or "")
+        if sentence.strip()
+    ]
+    return [
+        " ".join(sentences[index : index + 6])
+        for index in range(0, len(sentences), 6)
+    ]
 
 
 def _points_for_accuracy(score_percent):
