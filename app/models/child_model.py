@@ -15,6 +15,8 @@ class Child(db.Model):
     age = db.Column(db.Integer, nullable=False)
     gender = db.Column(db.String(30), nullable=False, default="prefer_not_to_say")
     child_pin_hash = db.Column(db.String(255), nullable=True)
+    profile_image_url = db.Column(db.String(500), nullable=True)
+    profile_image_public_id = db.Column(db.String(255), nullable=True)
     reading_level = db.Column(db.String(50), nullable=False, default="beginner")
     created_at = db.Column(db.DateTime, default=utc_now)
 
@@ -45,6 +47,7 @@ class Child(db.Model):
             "name": self.name,
             "age": self.age,
             "gender": self.gender,
+            "profile_image_url": self.profile_image_url,
             "has_pin": bool(self.child_pin_hash),
             "reading_level": self.reading_level,
             "created_at": utc_isoformat(self.created_at),

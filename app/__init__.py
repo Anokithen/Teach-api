@@ -31,6 +31,7 @@ def create_app():
             try:
                 db.create_all()
                 _ensure_voice_profile_schema()
+                _ensure_profile_image_schema()
                 _ensure_book_schema()
             except Exception as exc:  # pragma: no cover - startup diagnostics only
                 app.logger.error("Could not create database tables: %s", exc)
@@ -126,4 +127,18 @@ def _ensure_book_schema():
     if "image_urls" in columns:
         return
     db.session.execute(text("ALTER TABLE books ADD COLUMN image_urls JSON NULL"))
+    db.session.commit()
+
+
+def _ensure_profile_image_schema():
+    """Add optional profile image fields to existing account and child tables."""
+    for table in ("parents", "children"):
+        inspector = inspect(db.engine)
+        if not inspector.has_table(table):
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "profile_image_url" not in columns:
+            db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN profile_image_url VARCHAR(500) NULL"))
+        if "profile_image_public_id" not in columns:
+            db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN profile_image_public_id VARCHAR(255) NULL"))
     db.session.commit()

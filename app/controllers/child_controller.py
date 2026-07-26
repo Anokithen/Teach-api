@@ -1,10 +1,11 @@
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 
 from app.extensions import db
 from app.models.child_model import Child
 from app.models.parent_model import Parent, ROLE_PARENT
 from app.middleware import can_access_child
+from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
@@ -171,6 +172,51 @@ def update_child(child_id):
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
+def upload_profile_image_for_child(child_id):
+    child = db.session.get(Child, child_id)
+    if not can_access_child(child):
+        return jsonify({"error": "Child not found."}), 404
+    image = request.files.get("profile_image")
+    if image is None or not image.filename:
+        return jsonify({"error": "A profile image is required."}), 400
+    try:
+        validate_uploaded_file(image, "image")
+        url, public_id = upload_profile_image(image, "children", child.id, current_app.config)
+        old_public_id = child.profile_image_public_id
+        child.profile_image_url = url
+        child.profile_image_public_id = public_id
+        db.session.commit()
+        if old_public_id:
+            try:
+                delete_profile_image(old_public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not delete the previous child profile image")
+        return jsonify({"message": "Child profile image updated successfully.", "child": child.to_dict()}), 200
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Profile image upload failed."}), 500
+
+
+def delete_profile_image_for_child(child_id):
+    child = db.session.get(Child, child_id)
+    if not can_access_child(child):
+        return jsonify({"error": "Child not found."}), 404
+    old_public_id = child.profile_image_public_id
+    child.profile_image_url = None
+    child.profile_image_public_id = None
+    try:
+        db.session.commit()
+        if old_public_id:
+            delete_profile_image(old_public_id, current_app.config)
+        return jsonify({"message": "Child profile image removed.", "child": child.to_dict()}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"error": "Profile image removal failed."}), 500
+
+
 def verify_child_pin(child_id):
     child = db.session.get(Child, child_id)
     if not can_access_child(child):
@@ -192,9 +238,15 @@ def delete_child(child_id):
     if not can_access_child(child):
         return jsonify({"error": "Child not found."}), 404
 
+    public_id = child.profile_image_public_id
     try:
         db.session.delete(child)
         db.session.commit()
+        if public_id:
+            try:
+                delete_profile_image(public_id, current_app.config)
+            except Exception:
+                current_app.logger.exception("Could not delete the child profile image during child removal")
         return jsonify({"message": "Child profile removed successfully."}), 200
     except Exception:
         db.session.rollback()

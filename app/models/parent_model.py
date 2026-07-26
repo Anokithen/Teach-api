@@ -20,6 +20,8 @@ class Parent(db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_PARENT)
     is_banned = db.Column(db.Boolean, nullable=False, default=False)
+    profile_image_url = db.Column(db.String(500), nullable=True)
+    profile_image_public_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now)
 
     children = db.relationship(
@@ -58,5 +60,6 @@ class Parent(db.Model):
             "email": self.email,
             "role": self.role,
             "is_banned": self.is_banned,
+            "profile_image_url": self.profile_image_url,
             "created_at": utc_isoformat(self.created_at),
         }

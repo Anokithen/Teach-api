@@ -271,3 +271,27 @@ def upload_book_media(file, media_type, owner_id, config):
         overwrite=False,
     )
     return result["secure_url"]
+
+
+def upload_profile_image(file, profile_type, profile_id, config):
+    """Store a public account or child profile image."""
+    validate_uploaded_file(file, "image")
+    cloudinary = _cloudinary_modules()
+    configure_cloudinary(config)
+    result = cloudinary.uploader.upload(
+        file,
+        resource_type="image",
+        folder=f"profile_images/{profile_type}",
+        public_id=f"{profile_id}_{uuid4().hex}",
+        overwrite=False,
+    )
+    return result["secure_url"], result["public_id"]
+
+
+def delete_profile_image(public_id, config):
+    """Delete a previously stored public profile image."""
+    if not public_id:
+        return
+    cloudinary = _cloudinary_modules()
+    configure_cloudinary(config)
+    cloudinary.uploader.destroy(public_id, resource_type="image", invalidate=True)
