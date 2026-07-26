@@ -5,7 +5,10 @@ from email_validator import validate_email, EmailNotValidError
 from app.extensions import db
 from app.models.parent_model import Parent
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
-from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
+from app.controllers import asset_controller
+from app.models.asset_model import Asset, STATUS_DELETED, USER_PROFILE_IMAGE
+from app.services.cloudinary_service import delete_asset, delete_profile_image
+from app.utils import utc_now
 
 
 def get_me():
@@ -63,38 +66,43 @@ def update_me():
 
 
 def upload_profile_image_for_current_user():
-    image = request.files.get("profile_image")
-    if image is None or not image.filename:
-        return jsonify({"error": "A profile image is required."}), 400
+    image, error = asset_controller._validated_file(USER_PROFILE_IMAGE, "image")
+    if error:
+        return error
     try:
-        validate_uploaded_file(image, "image")
-        url, public_id = upload_profile_image(image, "accounts", current_user.id, current_app.config)
-        old_public_id = current_user.profile_image_public_id
-        current_user.profile_image_url = url
-        current_user.profile_image_public_id = public_id
-        db.session.commit()
-        if old_public_id:
-            try:
-                delete_profile_image(old_public_id, current_app.config)
-            except Exception:
-                current_app.logger.exception("Could not delete the previous account profile image")
+        asset_controller._save_profile(
+            image,
+            USER_PROFILE_IMAGE,
+            asset_controller.get_user_profile_folder(current_user.id),
+            current_user.id,
+        )
         return jsonify({"message": "Profile image updated successfully.", "parent": current_user.to_dict()}), 200
-    except ValueError as exc:
-        db.session.rollback()
-        return jsonify({"error": str(exc)}), 400
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Profile image upload failed."}), 500
 
 
 def delete_profile_image_for_current_user():
-    old_public_id = current_user.profile_image_public_id
-    current_user.profile_image_url = None
-    current_user.profile_image_public_id = None
+    asset = Asset.query.filter_by(
+        owner_user_id=current_user.id,
+        asset_category=USER_PROFILE_IMAGE,
+        deleted_at=None,
+    ).first()
     try:
+        if asset:
+            delete_asset(
+                asset.cloudinary_public_id,
+                asset.cloudinary_resource_type,
+                asset.cloudinary_delivery_type,
+            )
+            asset.status = STATUS_DELETED
+            asset.deleted_at = utc_now()
+            asset.active_slot = None
+        elif current_user.profile_image_public_id:
+            delete_profile_image(current_user.profile_image_public_id, current_app.config)
+        current_user.profile_image_url = None
+        current_user.profile_image_public_id = None
         db.session.commit()
-        if old_public_id:
-            delete_profile_image(old_public_id, current_app.config)
         return jsonify({"message": "Profile image removed.", "parent": current_user.to_dict()}), 200
     except Exception:
         db.session.rollback()

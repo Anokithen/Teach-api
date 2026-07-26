@@ -97,6 +97,12 @@ class Config:
     CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
     CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
     CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+    CLOUDINARY_ROOT_FOLDER = _env_value("CLOUDINARY_ROOT_FOLDER", default="teachalike")
+    MAX_PROFILE_IMAGE_SIZE_MB = int(_env_value("MAX_PROFILE_IMAGE_SIZE_MB", default="10"))
+    MAX_CHILD_IMAGE_SIZE_MB = int(_env_value("MAX_CHILD_IMAGE_SIZE_MB", default="10"))
+    MAX_VOICE_PROFILE_SIZE_MB = int(_env_value("MAX_VOICE_PROFILE_SIZE_MB", default="50"))
+    MAX_BOOK_AUDIO_SIZE_MB = int(_env_value("MAX_BOOK_AUDIO_SIZE_MB", default="250"))
+    MAX_BOOK_VIDEO_SIZE_MB = int(_env_value("MAX_BOOK_VIDEO_SIZE_MB", default="1000"))
 
     # Keep this server-side. Never expose the ElevenLabs key through Next.js
     # public environment variables or return it from an API response.
@@ -154,4 +160,5 @@ class Config:
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vosk-model-small-en-us-0.15"),
     )
   
-    MAX_CONTENT_LENGTH = 25 * 1024 * 1024
+    # Per-category checks enforce smaller limits after authentication.
+    MAX_CONTENT_LENGTH = (MAX_BOOK_VIDEO_SIZE_MB + 1) * 1024 * 1024

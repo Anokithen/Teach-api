@@ -14,6 +14,7 @@ from app.routes import register_blueprints
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    _validate_cloudinary_config(app.config)
     CORS(
         app,
         resources={r"/api/*": {"origins": app.config["FRONTEND_ORIGINS"]}},
@@ -96,6 +97,21 @@ def create_app():
         return jsonify({"error": "The recording must be smaller than 25 MB."}), 413
 
     return app
+
+
+def _validate_cloudinary_config(config):
+    """Fail fast on partial credentials without breaking non-storage installs."""
+    names = (
+        "CLOUDINARY_CLOUD_NAME",
+        "CLOUDINARY_API_KEY",
+        "CLOUDINARY_API_SECRET",
+    )
+    present = [bool(config.get(name)) for name in names]
+    if any(present) and not all(present):
+        raise RuntimeError(
+            "Cloudinary configuration is incomplete; cloud name, API key, and "
+            "API secret must be configured together."
+        )
 
 
 def _ensure_voice_profile_schema():

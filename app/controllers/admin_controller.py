@@ -241,13 +241,22 @@ def generate_book_draft_for_admin():
 
 
 def upload_media():
-    """Upload a public book cover or video for use in the catalog."""
+    """Upload a public book image for use while drafting the catalog entry."""
     file = request.files.get("file")
     media_type = request.form.get("media_type")
     if not file or not file.filename:
         return jsonify({"errors": ["file is required."]}), 400
-    if media_type not in {"image", "video"}:
-        return jsonify({"errors": ["media_type must be image or video."]}), 400
+    if media_type == "video":
+        return jsonify(
+            {
+                "error": (
+                    "Book videos require an existing book and must be uploaded "
+                    "through /api/admin/books/<book_id>/videos."
+                )
+            }
+        ), 422
+    if media_type != "image":
+        return jsonify({"errors": ["media_type must be image."]}), 400
     try:
         url = upload_book_media(file, media_type, current_user.id, current_app.config)
         return jsonify({"url": url}), 201
