@@ -1,5 +1,6 @@
 """Server-side Cloudinary storage for private voice recordings."""
 import re
+from urllib.parse import urlparse
 from uuid import uuid4
 from flask import current_app, has_app_context
 
@@ -333,12 +334,25 @@ def signed_voice_delivery_url(public_id, fallback_url, config):
         return fallback_url
     cloudinary = _cloudinary_modules()
     configure_cloudinary(config)
+    # The stored public ID intentionally has no extension, while Cloudinary's
+    # authenticated video/audio delivery URL must include the uploaded format.
+    # Without it Cloudinary returns an unsigned-looking 404 response; browsers
+    # following our cross-origin redirect surface that response as a generic
+    # Axios "Network Error".
+    path = urlparse(str(fallback_url or "")).path
+    extension = path.rsplit("/", 1)[-1].rsplit(".", 1)[-1].lower()
+    delivery_options = (
+        {"format": extension}
+        if extension in ALLOWED_EXTENSIONS
+        else {}
+    )
     url, _ = cloudinary.utils.cloudinary_url(
         public_id,
         resource_type="video",
         type="authenticated",
         sign_url=True,
         secure=True,
+        **delivery_options,
     )
     return url
 

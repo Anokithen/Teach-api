@@ -25,7 +25,7 @@ from app.services.cloudinary_path_service import (
     get_voice_profile_folder,
     sanitize_folder_segment,
 )
-from app.services.cloudinary_service import upload_asset
+from app.services.cloudinary_service import signed_voice_delivery_url, upload_asset
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 64
@@ -70,6 +70,47 @@ class PathServiceTests(unittest.TestCase):
             get_generated_book_audio_folder(1, 10, "Same"),
             get_generated_book_audio_folder(1, 11, "Same"),
         )
+
+    @patch("app.services.cloudinary_service._cloudinary_modules")
+    def test_signed_audio_delivery_keeps_uploaded_format(self, modules):
+        cloudinary_url = MagicMock(return_value=("https://signed.test/audio.wav", {}))
+        modules.return_value = SimpleNamespace(
+            config=MagicMock(),
+            utils=SimpleNamespace(cloudinary_url=cloudinary_url),
+        )
+
+        result = signed_voice_delivery_url(
+            "teachalike/users_voiceprofiles/owner/sample",
+            "https://res.cloudinary.test/video/authenticated/sample.wav?token=old",
+            {
+                "CLOUDINARY_CLOUD_NAME": "test",
+                "CLOUDINARY_API_KEY": "test",
+                "CLOUDINARY_API_SECRET": "test",
+            },
+        )
+
+        self.assertEqual(result, "https://signed.test/audio.wav")
+        self.assertEqual(cloudinary_url.call_args.kwargs["format"], "wav")
+
+    @patch("app.services.cloudinary_service._cloudinary_modules")
+    def test_signed_narration_delivery_keeps_mp3_format(self, modules):
+        cloudinary_url = MagicMock(return_value=("https://signed.test/audio.mp3", {}))
+        modules.return_value = SimpleNamespace(
+            config=MagicMock(),
+            utils=SimpleNamespace(cloudinary_url=cloudinary_url),
+        )
+
+        signed_voice_delivery_url(
+            "teachalike/generated_booksaudio/owner/book/voice_profile_1",
+            "https://res.cloudinary.test/video/authenticated/narration.mp3",
+            {
+                "CLOUDINARY_CLOUD_NAME": "test",
+                "CLOUDINARY_API_KEY": "test",
+                "CLOUDINARY_API_SECRET": "test",
+            },
+        )
+
+        self.assertEqual(cloudinary_url.call_args.kwargs["format"], "mp3")
 
 
 class AssetEndpointTests(unittest.TestCase):
