@@ -9,6 +9,8 @@ MAX_NAME_LENGTH = 120
 MAX_EMAIL_LENGTH = 120
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
+MIN_EXIT_PASSWORD_LENGTH = 8
+MAX_EXIT_PASSWORD_LENGTH = 128
 MAX_URL_LENGTH = 500
 
 
@@ -49,6 +51,25 @@ def validate_password(value, *, required=True):
     if len(password) > MAX_PASSWORD_LENGTH:
         return password, f"password must be {MAX_PASSWORD_LENGTH} characters or fewer."
     return password, None
+
+
+def validate_exit_password(value, *, required=True):
+    exit_password = "" if value is None else str(value)
+    if required and not exit_password:
+        return exit_password, "exit_password is required."
+    if not exit_password:
+        return exit_password, None
+    if len(exit_password) < MIN_EXIT_PASSWORD_LENGTH:
+        return (
+            exit_password,
+            f"exit_password must be at least {MIN_EXIT_PASSWORD_LENGTH} characters.",
+        )
+    if len(exit_password) > MAX_EXIT_PASSWORD_LENGTH:
+        return (
+            exit_password,
+            f"exit_password must be {MAX_EXIT_PASSWORD_LENGTH} characters or fewer.",
+        )
+    return exit_password, None
 
 
 def is_safe_http_url(value):

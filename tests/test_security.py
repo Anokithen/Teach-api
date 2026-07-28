@@ -17,6 +17,7 @@ from app.models.mini_game_model import MiniGame
 from app.models.parent_model import Parent, ROLE_ADMIN, ROLE_PARENT, ROLE_TEACHER
 from app.security import (
     anonymized_key,
+    exit_password_attempts,
     login_attempts,
     pin_attempts,
     registration_attempts,
@@ -41,6 +42,8 @@ class SecurityTests(unittest.TestCase):
             REGISTER_RATE_LIMIT_WINDOW_SECONDS=60,
             PIN_RATE_LIMIT_ATTEMPTS=2,
             PIN_RATE_LIMIT_WINDOW_SECONDS=60,
+            EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS=2,
+            EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS=60,
         )
         self.context = self.app.app_context()
         self.context.push()
@@ -81,6 +84,10 @@ class SecurityTests(unittest.TestCase):
         login_attempts.reset(anonymized_key("login-ip", self.remote_addr))
         registration_attempts.reset(
             anonymized_key("register-ip", self.remote_addr)
+        )
+        exit_password_attempts.reset(f"exit-password:{self.parent.id}")
+        exit_password_attempts.reset(
+            f"exit-password-config:{self.parent.id}"
         )
         db.session.remove()
         db.drop_all()
@@ -205,6 +212,110 @@ class SecurityTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {refresh_token}"},
         )
         self.assertEqual(refresh_response.status_code, 401)
+
+    def test_exit_password_is_hashed_editable_and_required_for_logout(self):
+        headers = self._headers(self.parent)
+        self.assertFalse(
+            self.client.get("/api/parents/me", headers=headers).json["parent"][
+                "has_exit_password"
+            ]
+        )
+
+        created = self.client.patch(
+            "/api/parents/me/exit-password",
+            headers=headers,
+            json={
+                "current_password": "SecurePass123!",
+                "exit_password": "ParentExit123!",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.json)
+        self.assertTrue(created.json["parent"]["has_exit_password"])
+        self.assertNotEqual(
+            self.parent.exit_password_hash,
+            "ParentExit123!",
+        )
+        self.assertTrue(self.parent.check_exit_password("ParentExit123!"))
+
+        edited = self.client.patch(
+            "/api/parents/me/exit-password",
+            headers=headers,
+            json={
+                "current_password": "SecurePass123!",
+                "exit_password": "NewParentExit456!",
+            },
+        )
+        self.assertEqual(edited.status_code, 200, edited.json)
+        self.assertFalse(self.parent.check_exit_password("ParentExit123!"))
+        self.assertTrue(self.parent.check_exit_password("NewParentExit456!"))
+
+        rejected = self._post(
+            "/api/auth/logout",
+            headers=headers,
+            json={"exit_password": "ParentExit123!"},
+        )
+        self.assertEqual(rejected.status_code, 401, rejected.json)
+        still_authenticated = self.client.get(
+            "/api/parents/me",
+            headers=headers,
+        )
+        self.assertEqual(still_authenticated.status_code, 200)
+
+        accepted = self._post(
+            "/api/auth/logout",
+            headers=headers,
+            json={"exit_password": "NewParentExit456!"},
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.json)
+        self.assertEqual(
+            self.client.get("/api/parents/me", headers=headers).status_code,
+            401,
+        )
+
+    def test_exit_password_can_be_removed_with_account_password(self):
+        self.parent.set_exit_password("ParentExit123!")
+        db.session.commit()
+        headers = self._headers(self.parent)
+
+        wrong = self.client.delete(
+            "/api/parents/me/exit-password",
+            headers=headers,
+            json={"current_password": "WrongPass123!"},
+        )
+        self.assertEqual(wrong.status_code, 401, wrong.json)
+        self.assertTrue(self.parent.exit_password_hash)
+
+        removed = self.client.delete(
+            "/api/parents/me/exit-password",
+            headers=headers,
+            json={"current_password": "SecurePass123!"},
+        )
+        self.assertEqual(removed.status_code, 200, removed.json)
+        self.assertFalse(removed.json["parent"]["has_exit_password"])
+        self.assertIsNone(self.parent.exit_password_hash)
+
+    def test_exit_password_rate_limit_blocks_guessing(self):
+        self.parent.set_exit_password("ParentExit123!")
+        db.session.commit()
+        headers = self._headers(self.parent)
+        key = f"exit-password:{self.parent.id}"
+        try:
+            for _ in range(2):
+                response = self._post(
+                    "/api/auth/logout",
+                    headers=headers,
+                    json={"exit_password": "WrongExit123!"},
+                )
+                self.assertEqual(response.status_code, 401)
+            blocked = self._post(
+                "/api/auth/logout",
+                headers=headers,
+                json={"exit_password": "ParentExit123!"},
+            )
+            self.assertEqual(blocked.status_code, 429)
+            self.assertIn("Retry-After", blocked.headers)
+        finally:
+            exit_password_attempts.reset(key)
 
     def test_pin_rate_limit_blocks_brute_force(self):
         child = Child(

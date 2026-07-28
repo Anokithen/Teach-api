@@ -78,6 +78,7 @@ def create_app():
                 db.create_all()
                 _ensure_voice_profile_schema()
                 _ensure_profile_image_schema()
+                _ensure_exit_password_schema()
                 _ensure_book_schema()
             except Exception as exc:  # pragma: no cover - startup diagnostics only
                 app.logger.error("Could not create database tables: %s", exc)
@@ -187,4 +188,21 @@ def _ensure_profile_image_schema():
             db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN profile_image_url VARCHAR(500) NULL"))
         if "profile_image_public_id" not in columns:
             db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN profile_image_public_id VARCHAR(255) NULL"))
+    db.session.commit()
+
+
+def _ensure_exit_password_schema():
+    """Add the optional hashed exit password to existing account databases."""
+    inspector = inspect(db.engine)
+    if not inspector.has_table("parents"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("parents")}
+    if "exit_password_hash" in columns:
+        return
+    db.session.execute(
+        text(
+            "ALTER TABLE parents "
+            "ADD COLUMN exit_password_hash VARCHAR(255) NULL"
+        )
+    )
     db.session.commit()
