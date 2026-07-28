@@ -16,6 +16,7 @@ from app.models.child_model import Child
 from app.models.mini_game_model import MiniGame
 from app.models.parent_model import Parent, ROLE_ADMIN, ROLE_PARENT, ROLE_TEACHER
 from app.security import (
+    account_password_attempts,
     anonymized_key,
     exit_password_attempts,
     login_attempts,
@@ -44,6 +45,8 @@ class SecurityTests(unittest.TestCase):
             PIN_RATE_LIMIT_WINDOW_SECONDS=60,
             EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS=2,
             EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS=60,
+            ACCOUNT_PASSWORD_RATE_LIMIT_ATTEMPTS=2,
+            ACCOUNT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS=60,
         )
         self.context = self.app.app_context()
         self.context.push()
@@ -88,6 +91,12 @@ class SecurityTests(unittest.TestCase):
         exit_password_attempts.reset(f"exit-password:{self.parent.id}")
         exit_password_attempts.reset(
             f"exit-password-config:{self.parent.id}"
+        )
+        account_password_attempts.reset(
+            f"account-password:profile-update:{self.parent.id}"
+        )
+        account_password_attempts.reset(
+            f"account-password:account-delete:{self.parent.id}"
         )
         db.session.remove()
         db.drop_all()
@@ -339,6 +348,72 @@ class SecurityTests(unittest.TestCase):
             self.client.get("/api/parents/me", headers=headers).status_code,
             200,
         )
+
+    def test_sensitive_profile_changes_require_current_password(self):
+        headers = self._headers(self.parent)
+
+        missing = self.client.patch(
+            "/api/parents/me",
+            headers=headers,
+            json={"password": "ChangedPass456!"},
+        )
+        self.assertEqual(missing.status_code, 400, missing.json)
+        self.assertTrue(self.parent.check_password("SecurePass123!"))
+
+        wrong = self.client.patch(
+            "/api/parents/me",
+            headers=headers,
+            json={
+                "current_password": "WrongPass123!",
+                "email": "changed@example.com",
+            },
+        )
+        self.assertEqual(wrong.status_code, 401, wrong.json)
+        self.assertEqual(self.parent.email, "parent@example.com")
+
+        changed = self.client.patch(
+            "/api/parents/me",
+            headers=headers,
+            json={
+                "current_password": "SecurePass123!",
+                "email": "changed@example.com",
+                "password": "ChangedPass456!",
+            },
+        )
+        self.assertEqual(changed.status_code, 200, changed.json)
+        self.assertEqual(self.parent.email, "changed@example.com")
+        self.assertTrue(self.parent.check_password("ChangedPass456!"))
+
+        name_only = self.client.patch(
+            "/api/parents/me",
+            headers=headers,
+            json={"name": "Updated Parent"},
+        )
+        self.assertEqual(name_only.status_code, 200, name_only.json)
+        self.assertEqual(self.parent.name, "Updated Parent")
+
+    def test_account_deletion_requires_current_password(self):
+        headers = self._headers(self.parent)
+
+        missing = self.client.delete("/api/parents/me", headers=headers)
+        self.assertEqual(missing.status_code, 400, missing.json)
+        self.assertIsNotNone(db.session.get(Parent, self.parent.id))
+
+        wrong = self.client.delete(
+            "/api/parents/me",
+            headers=headers,
+            json={"current_password": "WrongPass123!"},
+        )
+        self.assertEqual(wrong.status_code, 401, wrong.json)
+        self.assertIsNotNone(db.session.get(Parent, self.parent.id))
+
+        deleted = self.client.delete(
+            "/api/parents/me",
+            headers=headers,
+            json={"current_password": "SecurePass123!"},
+        )
+        self.assertEqual(deleted.status_code, 202, deleted.json)
+        self.assertIsNone(db.session.get(Parent, self.parent.id))
 
     def test_pin_rate_limit_blocks_brute_force(self):
         child = Child(

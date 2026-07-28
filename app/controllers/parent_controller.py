@@ -3,7 +3,7 @@ from flask_jwt_extended import current_user
 from app.extensions import db
 from sqlalchemy.exc import IntegrityError
 from app.models.parent_model import Parent
-from app.security import exit_password_attempts
+from app.security import account_password_attempts, exit_password_attempts
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 from app.validators import (
@@ -33,6 +33,42 @@ def _check_exit_configuration_limit():
     response.status_code = 429
     response.headers["Retry-After"] = str(retry_after)
     return key, window, response
+
+
+def _verify_account_password(data, action):
+    current_password = str(data.get("current_password", ""))
+    if not current_password:
+        return None, jsonify(
+            {"errors": ["current_password is required."]}
+        ), 400
+    if len(current_password) > MAX_PASSWORD_LENGTH:
+        return None, jsonify(
+            {
+                "errors": [
+                    f"current_password must be {MAX_PASSWORD_LENGTH} characters or fewer."
+                ]
+            }
+        ), 400
+
+    key = f"account-password:{action}:{current_user.id}"
+    limit = current_app.config["ACCOUNT_PASSWORD_RATE_LIMIT_ATTEMPTS"]
+    window = current_app.config["ACCOUNT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS"]
+    blocked, retry_after = account_password_attempts.blocked(
+        key, limit, window
+    )
+    if blocked:
+        response = jsonify(
+            {"error": "Too many incorrect password attempts. Please try again later."}
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return None, response, None
+    if not current_user.check_password(current_password):
+        account_password_attempts.record_failure(key, window)
+        return None, jsonify(
+            {"error": "The current account password is incorrect."}
+        ), 401
+    return key, None, None
 
 
 def get_me():
@@ -71,6 +107,21 @@ def update_me():
         else:
             data["password"] = password
 
+    sensitive_change = "password" in data or (
+        "email" in data and data.get("email") != parent.email
+    )
+    password_attempt_key = None
+    if not errors and sensitive_change:
+        password_attempt_key, error_response, status = (
+            _verify_account_password(data, "profile-update")
+        )
+        if error_response:
+            return (
+                error_response
+                if status is None
+                else (error_response, status)
+            )
+
     if errors:
         return jsonify({"errors": errors}), 400
 
@@ -83,6 +134,8 @@ def update_me():
             parent.set_password(str(data.get("password")))
 
         db.session.commit()
+        if password_attempt_key:
+            account_password_attempts.reset(password_attempt_key)
         return jsonify({"message": "Profile updated successfully.", "parent": parent.to_dict()}), 200
     except IntegrityError:
         db.session.rollback()
@@ -245,11 +298,23 @@ def delete_profile_image_for_current_user():
 
 
 def delete_me():
+    data = request.get_json(silent=True) or {}
+    password_attempt_key, error_response, status = _verify_account_password(
+        data, "account-delete"
+    )
+    if error_response:
+        return (
+            error_response
+            if status is None
+            else (error_response, status)
+        )
+
     parent = current_user
     try:
         asset_refs = collect_account_asset_refs(parent)
         db.session.delete(parent)  # cascades to children & voice_profiles
         db.session.commit()
+        account_password_attempts.reset(password_attempt_key)
         schedule_account_asset_cleanup(asset_refs)
         return jsonify({"message": "Account deleted successfully. External asset cleanup is in progress."}), 202
     except Exception:
