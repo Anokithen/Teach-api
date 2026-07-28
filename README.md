@@ -113,23 +113,47 @@ Set `BOOK_GENERATION_PROVIDER=gemini` to keep using the existing Gemini draft ge
 
 Book preview narrations are generated separately from reading sessions. A parent selects one of their ready voice profiles and requests a cached narration for that `(book, voice profile)` pair. Generated audio and source recordings are private authenticated Cloudinary resources; the API only redirects to a signed URL after an ownership check.
 
-Cloudinary storage is organized as follows:
+Cloudinary storage uses database IDs and server-derived dynamic folders:
 
 ```text
 teachalike/
-├── users_voiceprofiles/<parent-or-teacher-name>/<random-upload-id>
-└── generated_booksaudio/<parent-or-teacher-name>/<book-name>/voice_profile_<id>
+└── <user_id>/Audio/
+    ├── Voice_profiles/voice_profile_<voice_profile_id>
+    └── Generated_Books_Audio/
+        └── <book_id>_<sanitized_book_name>/
+            └── voice_<voice_profile_id>_<book_id>_<generation_id>
 ```
 
-Voice-profile uploads use a random file ID, so every recording is retained and
-the owning parent or teacher can delete only their own profile through the API.
-Book narration files use a stable path based on the owner, book, and selected
-voice-profile ID. The database also has a unique `(book_id, voice_profile_id)`
-constraint. Reusing the same book with the same voice profile returns the
-existing narration; choosing another voice profile creates a separate audio
-file in the same book folder. The API also checks Cloudinary for the stable
-file before generating, so an existing file can be recovered if its database
-row is missing.
+Voice-profile rows are flushed before upload so their IDs become part of the
+private public ID. Narrations use their own generation IDs, allowing distinct
+versions without overwriting old audio. The existing background API still
+returns the latest cached narration for the same book/voice pair. All SDK
+calls run through `app/services/cloudinary_service.py`; folder construction
+runs through `app/services/cloudinary_path_service.py`.
+
+Registration does not create empty Cloudinary folders. The first asset upload
+creates its logical `asset_folder`. Apply
+`migrations/20260726_add_assets.sql` to existing MySQL deployments so normalized
+Cloudinary metadata is recorded in the `assets` ledger.
+
+Set these Cloudinary variables on the API service:
+
+```env
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+CLOUDINARY_ROOT_FOLDER=teachalike
+MAX_CONTENT_LENGTH_MB=1000
+MAX_PROFILE_IMAGE_SIZE_MB=10
+MAX_CHILD_IMAGE_SIZE_MB=10
+MAX_VOICE_PROFILE_SIZE_MB=50
+MAX_BOOK_AUDIO_SIZE_MB=250
+MAX_BOOK_VIDEO_SIZE_MB=1000
+```
+
+See [`docs/cloudinary-assets.md`](docs/cloudinary-assets.md) for folder
+mappings, supported formats, endpoints, cURL examples, replacement/deletion
+rules, account cleanup, Railway setup, migration details, and test commands.
 
 Set these server environment variables (the defaults are also in `.env.example`):
 
