@@ -76,9 +76,7 @@ class Config:
         "pool_recycle": 280,
         "connect_args": {"connect_timeout": 5},
     }
-    # Generate an unpredictable development key instead of shipping a known
-    # signing secret. Production deployments must set JWT_SECRET_KEY so tokens
-    # remain valid across workers and restarts.
+   
     JWT_SECRET_KEY = _env_value(
         "JWT_SECRET_KEY",
         default=secrets.token_urlsafe(48),
