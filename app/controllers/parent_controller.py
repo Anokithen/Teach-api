@@ -7,6 +7,7 @@ from app.security import exit_password_attempts
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 from app.validators import (
+    MAX_EXIT_PASSWORD_LENGTH,
     MAX_PASSWORD_LENGTH,
     validate_account_email,
     validate_exit_password,
@@ -167,6 +168,41 @@ def remove_exit_password():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Exit password could not be removed."}), 500
+
+
+def verify_exit_password():
+    if not current_user.exit_password_hash:
+        return jsonify({"error": "Exit protection is not enabled."}), 400
+
+    data = request.get_json(silent=True) or {}
+    exit_password = str(data.get("exit_password", ""))
+    if not exit_password:
+        return jsonify({"error": "Exit password is required."}), 400
+    if len(exit_password) > MAX_EXIT_PASSWORD_LENGTH:
+        return jsonify({"error": "The exit password is incorrect."}), 401
+
+    key = f"exit-password:{current_user.id}"
+    limit = current_app.config["EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS"]
+    window = current_app.config["EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS"]
+    blocked, retry_after = exit_password_attempts.blocked(key, limit, window)
+    if blocked:
+        response = jsonify(
+            {
+                "error": (
+                    "Too many incorrect exit password attempts. "
+                    "Please try again later."
+                )
+            }
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
+    if not current_user.check_exit_password(exit_password):
+        exit_password_attempts.record_failure(key, window)
+        return jsonify({"error": "The exit password is incorrect."}), 401
+
+    exit_password_attempts.reset(key)
+    return jsonify({"message": "Exit password verified."}), 200
 
 
 def upload_profile_image_for_current_user():

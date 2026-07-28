@@ -29,6 +29,12 @@ def remove_exit_password():
     return ctrl.remove_exit_password()
 
 
+@parent_bp.route("/me/exit-password/verify", methods=["POST"])
+@jwt_required()
+def verify_exit_password():
+    return ctrl.verify_exit_password()
+
+
 @parent_bp.route("/me", methods=["DELETE"])
 @jwt_required()
 def delete_me():

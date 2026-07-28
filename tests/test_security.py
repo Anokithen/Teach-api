@@ -317,6 +317,29 @@ class SecurityTests(unittest.TestCase):
         finally:
             exit_password_attempts.reset(key)
 
+    def test_exit_password_verification_unlocks_without_logging_out(self):
+        self.parent.set_exit_password("ParentExit123!")
+        db.session.commit()
+        headers = self._headers(self.parent)
+
+        rejected = self._post(
+            "/api/parents/me/exit-password/verify",
+            headers=headers,
+            json={"exit_password": "WrongExit123!"},
+        )
+        self.assertEqual(rejected.status_code, 401, rejected.json)
+
+        accepted = self._post(
+            "/api/parents/me/exit-password/verify",
+            headers=headers,
+            json={"exit_password": "ParentExit123!"},
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.json)
+        self.assertEqual(
+            self.client.get("/api/parents/me", headers=headers).status_code,
+            200,
+        )
+
     def test_pin_rate_limit_blocks_brute_force(self):
         child = Child(
             parent_id=self.parent.id,
