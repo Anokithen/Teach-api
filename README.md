@@ -30,7 +30,9 @@ Railway. A Railway MySQL service can be connected by referencing its native
 `MYSQL_URL` (or its `MYSQL*` variables); the API also accepts the existing
 `DB_*` variables. Apply the SQL files in `migrations/` before serving traffic.
 This includes `20260728_add_revoked_tokens.sql`, which is required for
-persistent access/refresh-token revocation during logout.
+persistent access/refresh-token revocation during logout, and
+`20260728_add_exit_password.sql`, which adds the optional hashed in-app exit
+password.
 
 For a Vercel frontend, set `FRONTEND_ORIGINS` on the Railway API service to the
 exact deployed frontend origin, for example
