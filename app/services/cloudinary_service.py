@@ -1,6 +1,15 @@
 """Server-side Cloudinary storage for private voice recordings."""
 import re
 from uuid import uuid4
+from flask import current_app, has_app_context
+
+
+class CloudinaryServiceError(RuntimeError):
+    """Safe application-level error for Cloudinary upload/delete failures."""
+
+
+class CloudinaryUploadError(CloudinaryServiceError):
+    """Raised when Cloudinary cannot store an uploaded asset."""
 
 # Browsers commonly record as WebM, OGG, or M4A rather than MP3/WAV.
 # Cloudinary stores all of these as authenticated video/audio resources.
@@ -147,6 +156,77 @@ def configure_cloudinary(config):
     if not all(values.values()):
         raise RuntimeError("Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the API server.")
     cloudinary.config(**values, secure=True)
+
+
+def upload_asset(
+    file,
+    folder,
+    resource_type="auto",
+    public_id=None,
+    overwrite=False,
+    delivery_type="upload",
+    **kwargs,
+):
+    """Upload an asset and return a normalized metadata dictionary.
+
+    Asset routes use one common contract for images, video, and authenticated
+    audio. Keeping the SDK call here also ensures provider errors never leak
+    credentials or implementation details through an HTTP response.
+    """
+    try:
+        cloudinary = _cloudinary_modules()
+        config = kwargs.pop("config", None)
+        if config is None:
+            config = current_app.config if has_app_context() else {}
+        configure_cloudinary(config)
+        upload_kwargs = {
+            "resource_type": resource_type,
+            "folder": folder,
+            "overwrite": overwrite,
+            "type": delivery_type,
+            **kwargs,
+        }
+        if public_id:
+            upload_kwargs["public_id"] = public_id
+        result = cloudinary.uploader.upload(file, **upload_kwargs)
+    except Exception as exc:
+        if isinstance(exc, CloudinaryServiceError):
+            raise
+        raise CloudinaryUploadError("Cloudinary upload failed.") from exc
+
+    return {
+        "asset_id": result.get("asset_id") or result.get("public_id"),
+        "public_id": result["public_id"],
+        "secure_url": result.get("secure_url") or result.get("url"),
+        "resource_type": result.get("resource_type") or resource_type,
+        "delivery_type": result.get("type") or result.get("delivery_type") or delivery_type,
+        "format": result.get("format"),
+        "bytes": result.get("bytes"),
+        "width": result.get("width"),
+        "height": result.get("height"),
+        "duration": result.get("duration"),
+        "asset_folder": result.get("asset_folder") or folder,
+        "original_filename": result.get("original_filename") or getattr(file, "filename", None),
+    }
+
+
+def delete_asset(public_id, resource_type="image", delivery_type="upload"):
+    """Delete an asset; missing Cloudinary resources are safely idempotent."""
+    if not public_id:
+        return "not found"
+    try:
+        cloudinary = _cloudinary_modules()
+        config = current_app.config if has_app_context() else {}
+        configure_cloudinary(config)
+        result = cloudinary.uploader.destroy(
+            public_id,
+            resource_type=resource_type,
+            type=delivery_type,
+            invalidate=True,
+        )
+    except Exception as exc:
+        raise CloudinaryServiceError("Cloudinary deletion failed.") from exc
+    return result.get("result") if isinstance(result, dict) else result
 
 
 def upload_voice_sample(file, owner_id, config, owner_name=None):

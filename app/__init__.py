@@ -93,7 +93,8 @@ def create_app():
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_file_too_large(err):
-        return jsonify({"error": "The recording must be smaller than 25 MB."}), 413
+        limit_mb = app.config.get("MAX_CONTENT_LENGTH", 0) // (1024 * 1024)
+        return jsonify({"error": f"The uploaded file must be smaller than {limit_mb} MB."}), 413
 
     return app
 

@@ -154,4 +154,14 @@ class Config:
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vosk-model-small-en-us-0.15"),
     )
   
-    MAX_CONTENT_LENGTH = 25 * 1024 * 1024
+    # Must accommodate the largest supported upload endpoint. Individual
+    # routes still enforce their narrower per-asset limits below.
+    MAX_CONTENT_LENGTH = int(_env_value("MAX_CONTENT_LENGTH_MB", default="100")) * 1024 * 1024
+
+    # Per-asset limits are kept separate from Flask's request-wide limit so
+    # each upload endpoint can return the correct validation response.
+    MAX_PROFILE_IMAGE_SIZE_MB = int(_env_value("MAX_PROFILE_IMAGE_SIZE_MB", default="5"))
+    MAX_CHILD_IMAGE_SIZE_MB = int(_env_value("MAX_CHILD_IMAGE_SIZE_MB", default="5"))
+    MAX_VOICE_PROFILE_SIZE_MB = int(_env_value("MAX_VOICE_PROFILE_SIZE_MB", default="25"))
+    MAX_BOOK_AUDIO_SIZE_MB = int(_env_value("MAX_BOOK_AUDIO_SIZE_MB", default="50"))
+    MAX_BOOK_VIDEO_SIZE_MB = int(_env_value("MAX_BOOK_VIDEO_SIZE_MB", default="100"))

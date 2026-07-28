@@ -248,6 +248,10 @@ def upload_media():
         return jsonify({"errors": ["file is required."]}), 400
     if media_type not in {"image", "video"}:
         return jsonify({"errors": ["media_type must be image or video."]}), 400
+    # Videos must be attached to a specific catalog book so their ownership
+    # and replacement lifecycle can be tracked by the asset endpoints.
+    if media_type == "video":
+        return jsonify({"errors": ["Use the book-specific video upload endpoint."]}), 422
     try:
         url = upload_book_media(file, media_type, current_user.id, current_app.config)
         return jsonify({"url": url}), 201
