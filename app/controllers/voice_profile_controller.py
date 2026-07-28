@@ -1,4 +1,4 @@
-from flask import current_app, jsonify, request, redirect
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -10,7 +10,7 @@ from app.services.cloudinary_path_service import get_voice_profile_folder
 from app.services.cloudinary_service import (
     CloudinaryServiceError,
     delete_voice_sample,
-    signed_voice_delivery_url,
+    stream_authenticated_audio,
     upload_asset,
     validate_upload_size,
     validate_uploaded_file,
@@ -170,12 +170,20 @@ def get_voice_profile_audio(voice_profile_id):
     profile = db.session.get(VoiceProfile, voice_profile_id)
     if not can_access_voice_profile(profile):
         return jsonify({"error": "Voice profile not found."}), 404
-    # A signed authenticated-delivery URL is generated only after our own
-    # ownership check. The browser never receives Cloudinary credentials.
+    # Proxy the signed resource after our ownership check. Returning a
+    # cross-origin redirect here makes browser XHR clients report a generic
+    # network error when Cloudinary does not add CORS headers to private audio.
     try:
-        return redirect(signed_voice_delivery_url(profile.cloudinary_public_id, profile.voice_sample_url, current_app.config))
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
+        return stream_authenticated_audio(
+            profile.cloudinary_public_id,
+            profile.voice_sample_url,
+            current_app.config,
+            request.headers.get("Range"),
+        )
+    except CloudinaryServiceError:
+        return jsonify({
+            "error": "Voice recording playback is temporarily unavailable."
+        }), 503
 
 
 def update_voice_profile(voice_profile_id):

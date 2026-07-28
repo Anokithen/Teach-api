@@ -4,7 +4,7 @@ import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import current_app, jsonify, redirect, request
+from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
 from app.extensions import db
 from app.middleware import can_access_book_narration, voice_profile_belongs_to_current_parent
@@ -15,8 +15,8 @@ from app.models.voice_profile_model import STATUS_READY as VOICE_STATUS_READY, V
 from app.services.cloudinary_service import (
     book_narration_public_id,
     delete_asset,
-    signed_narration_delivery_url,
     signed_voice_delivery_url,
+    stream_authenticated_audio,
     upload_book_narration,
 )
 from app.services.elevenlabs_service import ElevenLabsError, clone_voice_from_url, synthesize_narration
@@ -238,8 +238,13 @@ def get_book_narration_audio(narration_id):
     if narration.status != STATUS_READY or not narration.narration_audio_url:
         return jsonify({"error": "This narration is not ready yet."}), 409
     try:
-        return redirect(signed_narration_delivery_url(
-            narration.cloudinary_public_id, narration.narration_audio_url, current_app.config
-        ))
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
+        return stream_authenticated_audio(
+            narration.cloudinary_public_id,
+            narration.narration_audio_url,
+            current_app.config,
+            request.headers.get("Range"),
+        )
+    except CloudinaryServiceError:
+        return jsonify({
+            "error": "Narration playback is temporarily unavailable."
+        }), 503

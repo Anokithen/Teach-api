@@ -111,7 +111,7 @@ Set `BOOK_GENERATION_PROVIDER=gemini` to keep using the existing Gemini draft ge
 
 ## Voice-cloned book narration (ElevenLabs)
 
-Book preview narrations are generated separately from reading sessions. A parent selects one of their ready voice profiles and requests a cached narration for that `(book, voice profile)` pair. Generated audio and source recordings are private authenticated Cloudinary resources; the API only redirects to a signed URL after an ownership check.
+Book preview narrations are generated separately from reading sessions. A parent selects one of their ready voice profiles and requests a cached narration for that `(book, voice profile)` pair. Generated audio and source recordings are private authenticated Cloudinary resources; after an ownership check, the API streams the signed resource to the browser so private Cloudinary delivery never depends on cross-origin browser redirects.
 
 Cloudinary storage uses database IDs and server-derived dynamic folders:
 
@@ -143,6 +143,7 @@ CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_ROOT_FOLDER=teachalike
+CLOUDINARY_DELIVERY_TIMEOUT_SECONDS=60
 MAX_CONTENT_LENGTH_MB=1000
 MAX_PROFILE_IMAGE_SIZE_MB=10
 MAX_CHILD_IMAGE_SIZE_MB=10

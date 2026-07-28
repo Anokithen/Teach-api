@@ -17,6 +17,7 @@ CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_ROOT_FOLDER=teachalike
+CLOUDINARY_DELIVERY_TIMEOUT_SECONDS=60
 
 MAX_CONTENT_LENGTH_MB=1000
 MAX_PROFILE_IMAGE_SIZE_MB=10
@@ -83,9 +84,10 @@ so `profile` cannot collide between accounts.
 | Book video | `video` | `upload` |
 
 Cloudinary represents audio as a `video` resource. The API performs an
-ownership check before redirecting voice or narration playback to a signed
-authenticated-delivery URL. Signed URLs retain the stored file extension so
-browsers can play WAV, WebM, M4A, OGG, MP4-audio, and MP3 assets.
+ownership check, signs the authenticated resource server-side, and streams it
+through the API with HTTP Range support. The browser is never redirected
+cross-origin to private Cloudinary delivery. Signed URLs retain the stored file
+extension so browsers can play WAV, WebM, M4A, OGG, MP4-audio, and MP3 assets.
 
 ## Validation and limits
 

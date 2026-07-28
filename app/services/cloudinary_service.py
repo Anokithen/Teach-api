@@ -2,7 +2,8 @@
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from flask import current_app, has_app_context
+import requests
+from flask import Response, current_app, has_app_context, stream_with_context
 
 from app.services.cloudinary_path_service import (
     get_child_profile_folder,
@@ -444,6 +445,67 @@ def signed_voice_delivery_url(public_id, fallback_url, config):
         **delivery_options,
     )
     return url
+
+
+def stream_authenticated_audio(
+    public_id,
+    fallback_url,
+    config,
+    range_header=None,
+):
+    """Proxy private Cloudinary audio without a browser cross-origin redirect."""
+    signed_url = signed_voice_delivery_url(public_id, fallback_url, config)
+    request_headers = {}
+    if range_header:
+        request_headers["Range"] = range_header
+    timeout = int(config.get("CLOUDINARY_DELIVERY_TIMEOUT_SECONDS", 60))
+    try:
+        upstream = requests.get(
+            signed_url,
+            headers=request_headers,
+            stream=True,
+            allow_redirects=True,
+            timeout=(5, timeout),
+        )
+    except requests.RequestException as exc:
+        _log_storage_failure("authenticated audio delivery", public_id)
+        raise CloudinaryServiceError(
+            "Private audio delivery is temporarily unavailable."
+        ) from exc
+
+    if upstream.status_code not in {200, 206}:
+        upstream.close()
+        if has_app_context():
+            current_app.logger.error(
+                "Cloudinary audio delivery failed for public_id=%s status=%s",
+                public_id,
+                upstream.status_code,
+            )
+        raise CloudinaryServiceError(
+            "Private audio delivery is temporarily unavailable."
+        )
+
+    response = Response(
+        stream_with_context(upstream.iter_content(chunk_size=64 * 1024)),
+        status=upstream.status_code,
+        content_type=upstream.headers.get(
+            "Content-Type",
+            "application/octet-stream",
+        ),
+    )
+    for header in (
+        "Content-Length",
+        "Content-Range",
+        "Accept-Ranges",
+        "Content-Disposition",
+        "ETag",
+        "Last-Modified",
+    ):
+        value = upstream.headers.get(header)
+        if value:
+            response.headers[header] = value
+    response.call_on_close(upstream.close)
+    return response
 
 
 def upload_book_media(file, media_type, owner_id, config):

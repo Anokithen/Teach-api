@@ -882,6 +882,132 @@ class AssetEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422, response.json)
         destroy.assert_not_called()
 
+    def test_voice_audio_is_streamed_through_api_with_range_support(self):
+        profile = VoiceProfile(
+            parent_id=self.owner.id,
+            label="Playback",
+            voice_sample_url="https://res.cloudinary.test/private/voice.wav",
+            cloudinary_public_id="private-voice",
+            status=STATUS_READY,
+        )
+        db.session.add(profile)
+        db.session.commit()
+        upstream = MagicMock()
+        upstream.status_code = 206
+        upstream.headers = {
+            "Content-Type": "audio/wav",
+            "Content-Length": "4",
+            "Content-Range": "bytes 0-3/8",
+            "Accept-Ranges": "bytes",
+        }
+        upstream.iter_content.return_value = iter([b"RIFF"])
+        headers = {
+            **self._headers(self.owner),
+            "Range": "bytes=0-3",
+        }
+        with (
+            patch(
+                "app.services.cloudinary_service.signed_voice_delivery_url",
+                return_value="https://res.cloudinary.test/signed.wav",
+            ),
+            patch(
+                "app.services.cloudinary_service.requests.get",
+                return_value=upstream,
+            ) as get,
+        ):
+            response = self.client.get(
+                f"/api/voice-profiles/{profile.id}/audio",
+                headers=headers,
+            )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.data, b"RIFF")
+        self.assertEqual(response.content_type, "audio/wav")
+        self.assertEqual(response.headers["Content-Range"], "bytes 0-3/8")
+        self.assertNotIn("Location", response.headers)
+        self.assertEqual(
+            get.call_args.kwargs["headers"],
+            {"Range": "bytes=0-3"},
+        )
+        response.close()
+
+    def test_narration_audio_is_streamed_through_api(self):
+        profile = VoiceProfile(
+            parent_id=self.owner.id,
+            label="Narration playback",
+            voice_sample_url="https://res.cloudinary.test/private/voice.wav",
+            cloudinary_public_id="private-voice-narration",
+            status=STATUS_READY,
+        )
+        db.session.add(profile)
+        db.session.flush()
+        narration = BookNarration(
+            book_id=self.book.id,
+            voice_profile_id=profile.id,
+            status=STATUS_READY,
+            narration_audio_url="https://res.cloudinary.test/private/story.mp3",
+            cloudinary_public_id="private-story",
+        )
+        db.session.add(narration)
+        db.session.commit()
+        upstream = MagicMock()
+        upstream.status_code = 200
+        upstream.headers = {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": str(len(MP3)),
+            "Accept-Ranges": "bytes",
+        }
+        upstream.iter_content.return_value = iter([MP3])
+        with (
+            patch(
+                "app.services.cloudinary_service.signed_voice_delivery_url",
+                return_value="https://res.cloudinary.test/signed.mp3",
+            ),
+            patch(
+                "app.services.cloudinary_service.requests.get",
+                return_value=upstream,
+            ),
+        ):
+            response = self.client.get(
+                f"/api/book-narrations/{narration.id}/audio",
+                headers=self._headers(self.owner),
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, MP3)
+        self.assertEqual(response.content_type, "audio/mpeg")
+        self.assertNotIn("Location", response.headers)
+        response.close()
+
+    def test_private_audio_upstream_error_is_sanitized(self):
+        profile = VoiceProfile(
+            parent_id=self.owner.id,
+            label="Unavailable playback",
+            voice_sample_url="https://res.cloudinary.test/private/voice.wav",
+            cloudinary_public_id="unavailable-private-voice",
+            status=STATUS_READY,
+        )
+        db.session.add(profile)
+        db.session.commit()
+        upstream = MagicMock()
+        upstream.status_code = 403
+        upstream.headers = {}
+        with (
+            patch(
+                "app.services.cloudinary_service.signed_voice_delivery_url",
+                return_value="https://res.cloudinary.test/signed.wav",
+            ),
+            patch(
+                "app.services.cloudinary_service.requests.get",
+                return_value=upstream,
+            ),
+        ):
+            response = self.client.get(
+                f"/api/voice-profiles/{profile.id}/audio",
+                headers=self._headers(self.owner),
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("403", response.get_data(as_text=True))
+        upstream.close.assert_called_once()
+
     @patch("app.controllers.asset_controller.upload_asset")
     def test_admin_video_upload_validates_book(self, upload):
         upload.side_effect = self._upload_result
