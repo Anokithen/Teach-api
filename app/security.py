@@ -63,5 +63,4 @@ def anonymized_key(prefix, value):
 registration_attempts = AttemptLimiter()
 login_attempts = AttemptLimiter()
 pin_attempts = AttemptLimiter()
-exit_password_attempts = AttemptLimiter()
 account_password_attempts = AttemptLimiter()

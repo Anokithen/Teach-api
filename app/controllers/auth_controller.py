@@ -7,7 +7,6 @@ from flask_jwt_extended import (
     decode_token,
     get_jwt,
     get_jwt_identity,
-    current_user,
     jwt_required,
 )
 from app.extensions import db
@@ -16,13 +15,11 @@ from app.models.parent_model import Parent
 from app.models.revoked_token_model import RevokedToken
 from app.security import (
     anonymized_key,
-    exit_password_attempts,
     login_attempts,
     registration_attempts,
 )
 from app.validators import (
     MAX_EMAIL_LENGTH,
-    MAX_EXIT_PASSWORD_LENGTH,
     MAX_PASSWORD_LENGTH,
     validate_account_email,
     validate_name,
@@ -194,36 +191,6 @@ def logout():
     access_payload = get_jwt()
     payloads = [access_payload]
     data = request.get_json(silent=True) or {}
-    if current_user.exit_password_hash:
-        exit_password = str(data.get("exit_password", ""))
-        if not exit_password:
-            return jsonify({"error": "Exit password is required."}), 401
-        if len(exit_password) > MAX_EXIT_PASSWORD_LENGTH:
-            return jsonify({"error": "The exit password is incorrect."}), 401
-
-        limit_key = f"exit-password:{current_user.id}"
-        limit = current_app.config["EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS"]
-        window = current_app.config["EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS"]
-        blocked, retry_after = exit_password_attempts.blocked(
-            limit_key, limit, window
-        )
-        if blocked:
-            response = jsonify(
-                {
-                    "error": (
-                        "Too many incorrect exit password attempts. "
-                        "Please try again later."
-                    )
-                }
-            )
-            response.status_code = 429
-            response.headers["Retry-After"] = str(retry_after)
-            return response
-        if not current_user.check_exit_password(exit_password):
-            exit_password_attempts.record_failure(limit_key, window)
-            return jsonify({"error": "The exit password is incorrect."}), 401
-        exit_password_attempts.reset(limit_key)
-
     refresh_token = data.get("refresh_token")
     if refresh_token:
         try:

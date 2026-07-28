@@ -18,7 +18,6 @@ class Parent(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), nullable=False, unique=True)
     password = db.Column(db.String(255), nullable=False)
-    exit_password_hash = db.Column(db.String(255), nullable=True)
     role = db.Column(db.String(20), nullable=False, default=ROLE_PARENT)
     is_banned = db.Column(db.Boolean, nullable=False, default=False)
     profile_image_url = db.Column(db.String(500), nullable=True)
@@ -42,14 +41,6 @@ class Parent(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password, password)
 
-    def set_exit_password(self, exit_password):
-        self.exit_password_hash = generate_password_hash(exit_password)
-
-    def check_exit_password(self, exit_password):
-        return bool(self.exit_password_hash) and check_password_hash(
-            self.exit_password_hash, exit_password
-        )
-
     @property
     def is_admin(self):
         return self.role == ROLE_ADMIN
@@ -69,7 +60,6 @@ class Parent(db.Model):
             "email": self.email,
             "role": self.role,
             "is_banned": self.is_banned,
-            "has_exit_password": bool(self.exit_password_hash),
             "profile_image_url": self.profile_image_url,
             "created_at": utc_isoformat(self.created_at),
         }

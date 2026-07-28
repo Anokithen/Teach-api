@@ -3,36 +3,15 @@ from flask_jwt_extended import current_user
 from app.extensions import db
 from sqlalchemy.exc import IntegrityError
 from app.models.parent_model import Parent
-from app.security import account_password_attempts, exit_password_attempts
+from app.security import account_password_attempts
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 from app.validators import (
-    MAX_EXIT_PASSWORD_LENGTH,
     MAX_PASSWORD_LENGTH,
     validate_account_email,
-    validate_exit_password,
     validate_name,
     validate_password,
 )
-
-
-def _exit_configuration_limit_key():
-    return f"exit-password-config:{current_user.id}"
-
-
-def _check_exit_configuration_limit():
-    limit = current_app.config["EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS"]
-    window = current_app.config["EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS"]
-    key = _exit_configuration_limit_key()
-    blocked, retry_after = exit_password_attempts.blocked(key, limit, window)
-    if not blocked:
-        return key, window, None
-    response = jsonify(
-        {"error": "Too many incorrect password attempts. Please try again later."}
-    )
-    response.status_code = 429
-    response.headers["Retry-After"] = str(retry_after)
-    return key, window, response
 
 
 def _verify_account_password(data, action):
@@ -143,119 +122,6 @@ def update_me():
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500
-
-
-def set_exit_password():
-    data = request.get_json(silent=True) or {}
-    current_password = str(data.get("current_password", ""))
-    exit_password, exit_password_error = validate_exit_password(
-        data.get("exit_password")
-    )
-    errors = []
-    if not current_password:
-        errors.append("current_password is required.")
-    elif len(current_password) > MAX_PASSWORD_LENGTH:
-        errors.append(
-            f"current_password must be {MAX_PASSWORD_LENGTH} characters or fewer."
-        )
-    if exit_password_error:
-        errors.append(exit_password_error)
-    if errors:
-        return jsonify({"errors": errors}), 400
-
-    key, window, blocked_response = _check_exit_configuration_limit()
-    if blocked_response:
-        return blocked_response
-    if not current_user.check_password(current_password):
-        exit_password_attempts.record_failure(key, window)
-        return jsonify({"error": "The current account password is incorrect."}), 401
-
-    try:
-        current_user.set_exit_password(exit_password)
-        db.session.commit()
-        exit_password_attempts.reset(key)
-        exit_password_attempts.reset(f"exit-password:{current_user.id}")
-        return jsonify(
-            {
-                "message": "Exit password saved successfully.",
-                "parent": current_user.to_dict(),
-            }
-        ), 200
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Exit password could not be saved."}), 500
-
-
-def remove_exit_password():
-    data = request.get_json(silent=True) or {}
-    current_password = str(data.get("current_password", ""))
-    if not current_password:
-        return jsonify({"errors": ["current_password is required."]}), 400
-    if len(current_password) > MAX_PASSWORD_LENGTH:
-        return jsonify(
-            {
-                "errors": [
-                    f"current_password must be {MAX_PASSWORD_LENGTH} characters or fewer."
-                ]
-            }
-        ), 400
-
-    key, window, blocked_response = _check_exit_configuration_limit()
-    if blocked_response:
-        return blocked_response
-    if not current_user.check_password(current_password):
-        exit_password_attempts.record_failure(key, window)
-        return jsonify({"error": "The current account password is incorrect."}), 401
-
-    try:
-        current_user.exit_password_hash = None
-        db.session.commit()
-        exit_password_attempts.reset(key)
-        exit_password_attempts.reset(f"exit-password:{current_user.id}")
-        return jsonify(
-            {
-                "message": "Exit password removed.",
-                "parent": current_user.to_dict(),
-            }
-        ), 200
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Exit password could not be removed."}), 500
-
-
-def verify_exit_password():
-    if not current_user.exit_password_hash:
-        return jsonify({"error": "Exit protection is not enabled."}), 400
-
-    data = request.get_json(silent=True) or {}
-    exit_password = str(data.get("exit_password", ""))
-    if not exit_password:
-        return jsonify({"error": "Exit password is required."}), 400
-    if len(exit_password) > MAX_EXIT_PASSWORD_LENGTH:
-        return jsonify({"error": "The exit password is incorrect."}), 401
-
-    key = f"exit-password:{current_user.id}"
-    limit = current_app.config["EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS"]
-    window = current_app.config["EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS"]
-    blocked, retry_after = exit_password_attempts.blocked(key, limit, window)
-    if blocked:
-        response = jsonify(
-            {
-                "error": (
-                    "Too many incorrect exit password attempts. "
-                    "Please try again later."
-                )
-            }
-        )
-        response.status_code = 429
-        response.headers["Retry-After"] = str(retry_after)
-        return response
-    if not current_user.check_exit_password(exit_password):
-        exit_password_attempts.record_failure(key, window)
-        return jsonify({"error": "The exit password is incorrect."}), 401
-
-    exit_password_attempts.reset(key)
-    return jsonify({"message": "Exit password verified."}), 200
 
 
 def upload_profile_image_for_current_user():

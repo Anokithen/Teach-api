@@ -203,12 +203,6 @@ class Config:
     PIN_RATE_LIMIT_WINDOW_SECONDS = int(
         _env_value("PIN_RATE_LIMIT_WINDOW_SECONDS", default="300")
     )
-    EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS = int(
-        _env_value("EXIT_PASSWORD_RATE_LIMIT_ATTEMPTS", default="5")
-    )
-    EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS = int(
-        _env_value("EXIT_PASSWORD_RATE_LIMIT_WINDOW_SECONDS", default="300")
-    )
     ACCOUNT_PASSWORD_RATE_LIMIT_ATTEMPTS = int(
         _env_value("ACCOUNT_PASSWORD_RATE_LIMIT_ATTEMPTS", default="5")
     )
