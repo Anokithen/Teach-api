@@ -8,7 +8,11 @@ from app.models.book_model import Book
 from app.models.reading_session_model import ReadingSession
 from app.services.book_games import create_default_mini_games
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
-from app.services.cloudinary_service import upload_book_media
+from app.services.cloudinary_service import (
+    CloudinaryServiceError,
+    upload_book_media,
+    validate_upload_size,
+)
 from app.services.gemini_service import GeminiError, generate_book_draft as generate_gemini_book_draft
 from app.services.groq_service import GroqError, generate_book_draft as generate_groq_book_draft
 from app.services.nvidia_service import NvidiaError, generate_book_draft as generate_nvidia_book_draft
@@ -253,12 +257,18 @@ def upload_media():
     if media_type == "video":
         return jsonify({"errors": ["Use the book-specific video upload endpoint."]}), 422
     try:
+        validate_upload_size(
+            file,
+            current_app.config["MAX_PROFILE_IMAGE_SIZE_MB"],
+        )
         url = upload_book_media(file, media_type, current_user.id, current_app.config)
         return jsonify({"url": url}), 201
     except ValueError as exc:
-        return jsonify({"errors": [str(exc)]}), 400
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
+        message = str(exc)
+        status = 413 if "exceeds" in message else 415
+        return jsonify({"errors": [message]}), status
+    except CloudinaryServiceError:
+        return jsonify({"error": "Media upload failed."}), 503
     except Exception:
         return jsonify({"error": "Media upload failed."}), 500
 

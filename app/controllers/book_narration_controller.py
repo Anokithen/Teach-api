@@ -6,16 +6,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 from flask import current_app, jsonify, redirect, request
 from flask_jwt_extended import current_user
-from sqlalchemy.exc import IntegrityError
-
 from app.extensions import db
 from app.middleware import can_access_book_narration, voice_profile_belongs_to_current_parent
+from app.models.asset_model import Asset, GENERATED_BOOK_AUDIO
 from app.models.book_model import Book
 from app.models.book_narration_model import BookNarration, STATUS_FAILED, STATUS_PROCESSING, STATUS_READY
 from app.models.voice_profile_model import STATUS_READY as VOICE_STATUS_READY, VoiceProfile
 from app.services.cloudinary_service import (
     book_narration_public_id,
-    find_book_narration,
+    delete_asset,
     signed_narration_delivery_url,
     signed_voice_delivery_url,
     upload_book_narration,
@@ -36,6 +35,7 @@ NARRATION_FUTURES_LOCK = threading.RLock()
 def _generate_narration(app, narration_id):
     """Worker entry point; always creates its own Flask app context/session."""
     output_path = None
+    uploaded_metadata = None
     with app.app_context():
         try:
             narration = db.session.get(BookNarration, narration_id)
@@ -60,7 +60,7 @@ def _generate_narration(app, narration_id):
                 output_path = output.name
             synthesize_narration(book.text_content, profile.elevenlabs_voice_id, output_path, app.config)
             with open(output_path, "rb") as audio_file:
-                audio_url, public_id = upload_book_narration(
+                uploaded_metadata = upload_book_narration(
                     audio_file,
                     profile.parent_id,
                     profile.parent.name,
@@ -68,11 +68,28 @@ def _generate_narration(app, narration_id):
                     book.title,
                     profile.id,
                     app.config,
+                    generation_id=narration.id,
+                    return_metadata=True,
                 )
-            narration.narration_audio_url = audio_url
-            narration.cloudinary_public_id = public_id
+            narration.narration_audio_url = uploaded_metadata["secure_url"]
+            narration.cloudinary_public_id = uploaded_metadata["public_id"]
             narration.error_message = None
             narration.status = STATUS_READY
+            asset = Asset.query.filter_by(
+                generation_id=narration.id,
+                asset_category=GENERATED_BOOK_AUDIO,
+                deleted_at=None,
+            ).first()
+            if asset is None:
+                asset = Asset.from_cloudinary_metadata(
+                    uploaded_metadata,
+                    category=GENERATED_BOOK_AUDIO,
+                    owner_user_id=profile.parent_id,
+                    book_id=book.id,
+                    voice_profile_id=profile.id,
+                    generation_id=narration.id,
+                )
+                db.session.add(asset)
             db.session.commit()
         except ElevenLabsError as exc:
             db.session.rollback()
@@ -83,6 +100,19 @@ def _generate_narration(app, narration_id):
                 db.session.commit()
         except Exception:
             db.session.rollback()
+            if uploaded_metadata:
+                try:
+                    delete_asset(
+                        uploaded_metadata["public_id"],
+                        uploaded_metadata["resource_type"],
+                        uploaded_metadata.get("delivery_type") or "authenticated",
+                        config=app.config,
+                    )
+                except Exception:
+                    app.logger.exception(
+                        "Could not clean up failed narration upload asset_id=%s",
+                        uploaded_metadata.get("asset_id"),
+                    )
             narration = db.session.get(BookNarration, narration_id)
             if narration:
                 narration.status = STATUS_FAILED
@@ -132,26 +162,15 @@ def create_book_narration(book_id):
     if not (book.text_content or "").strip():
         return jsonify({"errors": ["This book has no text available for narration."]}), 400
 
-    # The stable public ID lets the API recover an already-generated file even
-    # if its database row was lost or a previous request stopped after upload.
-    narration_public_id = book_narration_public_id(
-        profile.parent_id,
-        profile.parent.name,
-        book.id,
-        book.title,
-        profile.id,
+    existing = (
+        BookNarration.query.filter_by(
+            book_id=book.id,
+            voice_profile_id=profile.id,
+        )
+        .order_by(BookNarration.id.desc())
+        .first()
     )
-    existing = BookNarration.query.filter_by(book_id=book.id, voice_profile_id=profile.id).first()
     if existing:
-        if existing.status != STATUS_READY:
-            stored_asset = find_book_narration(narration_public_id, current_app.config)
-            if stored_asset:
-                existing.narration_audio_url = stored_asset.get("secure_url")
-                existing.cloudinary_public_id = stored_asset.get("public_id", narration_public_id)
-                existing.error_message = None
-                existing.status = STATUS_READY
-                db.session.commit()
-                return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
         # Preserve the unique cache row, but allow a failed transient/configuration
         # job to be retried after the server has been corrected.
         if existing.status == STATUS_FAILED:
@@ -166,32 +185,23 @@ def create_book_narration(book_id):
             return jsonify({"message": "Narration generation restarted.", "book_narration": existing.to_dict(), "existing": True}), 202
         return jsonify({"book_narration": existing.to_dict(), "existing": True}), 200
 
-    stored_asset = find_book_narration(narration_public_id, current_app.config)
-    if stored_asset:
-        narration = BookNarration(
-            book_id=book.id,
-            voice_profile_id=profile.id,
-            status=STATUS_READY,
-            narration_audio_url=stored_asset.get("secure_url"),
-            cloudinary_public_id=stored_asset.get("public_id", narration_public_id),
-        )
-        db.session.add(narration)
-        db.session.commit()
-        return jsonify({"book_narration": narration.to_dict(), "existing": True}), 200
-
     try:
         narration = BookNarration(
             book_id=book.id,
             voice_profile_id=profile.id,
             status=STATUS_PROCESSING,
-            cloudinary_public_id=narration_public_id,
         )
         db.session.add(narration)
+        db.session.flush()
+        narration.cloudinary_public_id = book_narration_public_id(
+            profile.parent_id,
+            profile.parent.name,
+            book.id,
+            book.title,
+            profile.id,
+            narration.id,
+        )
         db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        narration = BookNarration.query.filter_by(book_id=book.id, voice_profile_id=profile.id).first()
-        return jsonify({"book_narration": narration.to_dict(), "existing": True}), 200
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500

@@ -30,13 +30,13 @@ from app.services.cloudinary_path_service import (
     get_child_profile_folder,
     get_generated_book_audio_folder,
     get_user_profile_folder,
-    get_voice_profile_folder,
     sanitize_folder_segment,
 )
 from app.services.cloudinary_service import (
     CloudinaryServiceError,
     delete_asset,
     upload_asset,
+    validate_upload_size,
     validate_uploaded_file,
 )
 from app.utils import utc_now
@@ -59,13 +59,10 @@ def _error(message, status):
     return jsonify({"success": False, "message": message, "data": None}), status
 
 
-def _file_size(upload) -> int:
-    stream = upload.stream
-    position = stream.tell()
-    stream.seek(0, 2)
-    size = stream.tell()
-    stream.seek(position)
-    return size
+def _legacy_error(result):
+    response, status = result
+    payload = response.get_json(silent=True) or {}
+    return jsonify({"error": payload.get("message") or "Asset operation failed."}), status
 
 
 def _validated_file(category, media_type):
@@ -76,30 +73,21 @@ def _validated_file(category, media_type):
         validate_uploaded_file(upload, media_type)
     except ValueError as exc:
         return None, _error(str(exc), 415)
-    limit_mb = int(current_app.config[SIZE_CONFIG[category]])
-    if _file_size(upload) > limit_mb * 1024 * 1024:
+    limit_mb = current_app.config[SIZE_CONFIG[category]]
+    try:
+        validate_upload_size(upload, limit_mb)
+    except ValueError:
         return None, _error(f"The file exceeds the {limit_mb} MB limit.", 413)
     upload.stream.seek(0)
     return upload, None
 
 
 def _new_asset(metadata, category, owner_id, **relations):
-    return Asset(
+    return Asset.from_cloudinary_metadata(
+        metadata,
+        category=category,
         owner_user_id=owner_id,
-        asset_category=category,
         active_slot=relations.pop("active_slot", None),
-        cloudinary_asset_id=metadata["asset_id"],
-        cloudinary_public_id=metadata["public_id"],
-        cloudinary_secure_url=metadata["secure_url"],
-        cloudinary_resource_type=metadata["resource_type"],
-        cloudinary_delivery_type=metadata.get("delivery_type") or "upload",
-        cloudinary_format=metadata.get("format"),
-        cloudinary_asset_folder=metadata["asset_folder"],
-        original_filename=metadata.get("original_filename"),
-        file_size_bytes=metadata.get("bytes"),
-        width=metadata.get("width"),
-        height=metadata.get("height"),
-        duration_seconds=metadata.get("duration"),
         status=relations.pop("status", STATUS_COMPLETED),
         **relations,
     )
@@ -201,11 +189,11 @@ def _save_profile(upload, category, folder, owner_id, child=None):
     return asset
 
 
-def upload_user_profile_image():
+def upload_user_profile_image(legacy_response=False):
     """Upload or replace the authenticated account's profile image."""
     upload, error = _validated_file(USER_PROFILE_IMAGE, "image")
     if error:
-        return error
+        return _legacy_error(error) if legacy_response else error
     try:
         asset = _save_profile(
             upload,
@@ -213,23 +201,34 @@ def upload_user_profile_image():
             get_user_profile_folder(current_user.id),
             current_user.id,
         )
+        if legacy_response:
+            return jsonify({
+                "message": "Profile image updated successfully.",
+                "parent": current_user.to_dict(),
+            }), 200
         return _response("Profile image uploaded.", asset.to_dict(), 201)
     except CloudinaryServiceError:
+        if legacy_response:
+            return jsonify({"error": "Profile image upload failed."}), 503
         return _error("Profile image upload failed.", 503)
     except SQLAlchemyError:
+        if legacy_response:
+            return jsonify({"error": "Profile image metadata could not be saved."}), 500
         return _error("Profile image metadata could not be saved.", 500)
 
 
-def upload_child_profile_image(child_id):
+def upload_child_profile_image(child_id, legacy_response=False):
     """Upload or replace a profile image for a managed child."""
     child = db.session.get(Child, child_id)
     if child is None:
-        return _error("Child not found.", 404)
+        result = _error("Child not found.", 404)
+        return _legacy_error(result) if legacy_response else result
     if not can_access_child(child):
-        return _error("You cannot manage this child.", 403)
+        result = _error("You cannot manage this child.", 403)
+        return _legacy_error(result) if legacy_response else result
     upload, error = _validated_file(CHILD_PROFILE_IMAGE, "image")
     if error:
-        return error
+        return _legacy_error(error) if legacy_response else error
     try:
         asset = _save_profile(
             upload,
@@ -238,55 +237,100 @@ def upload_child_profile_image(child_id):
             current_user.id,
             child,
         )
+        if legacy_response:
+            return jsonify({
+                "message": "Child profile image updated successfully.",
+                "child": child.to_dict(),
+            }), 200
         return _response("Child profile image uploaded.", asset.to_dict(), 201)
     except CloudinaryServiceError:
+        if legacy_response:
+            return jsonify({"error": "Child profile image upload failed."}), 503
         return _error("Child profile image upload failed.", 503)
     except SQLAlchemyError:
+        if legacy_response:
+            return jsonify({"error": "Child profile metadata could not be saved."}), 500
         return _error("Child profile metadata could not be saved.", 500)
 
 
-def upload_voice_profile():
-    """Create a voice profile and store its source recording."""
-    upload, error = _validated_file(VOICE_PROFILE, "audio")
-    if error:
-        return error
-    label = str(request.form.get("label") or "").strip()
-    if len(label) > 80:
-        return _error("label must be 80 characters or fewer.", 422)
-    profile = VoiceProfile(
-        parent_id=current_user.id,
-        label=label or None,
-        voice_sample_url="pending",
-        status=STATUS_READY,
-    )
-    metadata = None
+def delete_user_profile_image_legacy():
+    """Remove the current profile image through the asset ledger when present."""
+    asset = Asset.query.filter_by(
+        owner_user_id=current_user.id,
+        asset_category=USER_PROFILE_IMAGE,
+        deleted_at=None,
+    ).order_by(Asset.id.desc()).first()
+    if asset:
+        result = delete_stored_asset(asset.id)
+        response, status = result
+        if status >= 400:
+            return _legacy_error(result)
+        return jsonify({
+            "message": "Profile image removed.",
+            "parent": current_user.to_dict(),
+        }), 200
+
+    public_id = current_user.profile_image_public_id
     try:
-        db.session.add(profile)
-        db.session.flush()
-        metadata = upload_asset(
-            upload,
-            get_voice_profile_folder(current_user.id),
-            resource_type="video",
-            public_id=f"voice_profile_{profile.id}",
-            overwrite=False,
-            delivery_type="authenticated",
-        )
-        profile.voice_sample_url = metadata["secure_url"]
-        profile.cloudinary_public_id = metadata["public_id"]
-        asset = _new_asset(
-            metadata, VOICE_PROFILE, current_user.id, voice_profile_id=profile.id
-        )
-        db.session.add(asset)
+        if public_id:
+            delete_asset(public_id, "image", "upload")
+        current_user.profile_image_url = None
+        current_user.profile_image_public_id = None
         db.session.commit()
-        return _response("Voice profile uploaded.", asset.to_dict(), 201)
+        return jsonify({
+            "message": "Profile image removed.",
+            "parent": current_user.to_dict(),
+        }), 200
     except CloudinaryServiceError:
-        db.session.rollback()
-        return _error("Voice profile upload failed.", 503)
+        return jsonify({"error": "Profile image removal failed."}), 503
     except SQLAlchemyError:
         db.session.rollback()
-        if metadata:
-            _cleanup_upload(metadata)
-        return _error("Voice profile metadata could not be saved.", 500)
+        return jsonify({"error": "Profile image removal failed."}), 500
+
+
+def delete_child_profile_image_legacy(child_id):
+    """Remove a managed child's image while preserving the legacy response."""
+    child = db.session.get(Child, child_id)
+    if child is None or not can_access_child(child):
+        return jsonify({"error": "Child not found."}), 404
+    asset = Asset.query.filter_by(
+        child_id=child.id,
+        asset_category=CHILD_PROFILE_IMAGE,
+        deleted_at=None,
+    ).order_by(Asset.id.desc()).first()
+    if asset:
+        result = delete_stored_asset(asset.id)
+        response, status = result
+        if status >= 400:
+            return _legacy_error(result)
+        return jsonify({
+            "message": "Child profile image removed.",
+            "child": child.to_dict(),
+        }), 200
+
+    public_id = child.profile_image_public_id
+    try:
+        if public_id:
+            delete_asset(public_id, "image", "upload")
+        child.profile_image_url = None
+        child.profile_image_public_id = None
+        db.session.commit()
+        return jsonify({
+            "message": "Child profile image removed.",
+            "child": child.to_dict(),
+        }), 200
+    except CloudinaryServiceError:
+        return jsonify({"error": "Profile image removal failed."}), 503
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"error": "Profile image removal failed."}), 500
+
+
+def upload_voice_profile():
+    """Create a cloned voice through the shared legacy-compatible workflow."""
+    from app.controllers.voice_profile_controller import create_voice_profile
+
+    return create_voice_profile(asset_response=True)
 
 
 def upload_book_narration(book_id):
@@ -300,6 +344,8 @@ def upload_book_narration(book_id):
         return _error("Voice profile not found.", 404)
     if not current_user.is_admin and profile.parent_id != current_user.id:
         return _error("You cannot use this voice profile.", 403)
+    if profile.status != STATUS_READY:
+        return _error("The selected voice profile is not ready.", 422)
     upload, error = _validated_file(GENERATED_BOOK_AUDIO, "audio")
     if error:
         return error
@@ -312,9 +358,12 @@ def upload_book_narration(book_id):
         db.session.flush()
         metadata = upload_asset(
             upload,
-            get_generated_book_audio_folder(current_user.id, book.id, book.title),
+            get_generated_book_audio_folder(profile.parent_id, book.id, book.title),
             resource_type="video",
-            public_id=f"voice_{profile.id}_{book.id}_{narration.id}",
+            public_id=(
+                f"{get_generated_book_audio_folder(profile.parent_id, book.id, book.title)}"
+                f"/voice_{profile.id}_{book.id}_{narration.id}"
+            ),
             overwrite=False,
             delivery_type="authenticated",
         )
@@ -323,7 +372,7 @@ def upload_book_narration(book_id):
         asset = _new_asset(
             metadata,
             GENERATED_BOOK_AUDIO,
-            current_user.id,
+            profile.parent_id,
             book_id=book.id,
             voice_profile_id=profile.id,
             generation_id=narration.id,

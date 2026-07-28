@@ -5,7 +5,6 @@ from sqlalchemy.exc import IntegrityError
 from app.models.parent_model import Parent
 from app.security import account_password_attempts
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
-from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
 from app.validators import (
     MAX_PASSWORD_LENGTH,
     validate_account_email,
@@ -125,42 +124,15 @@ def update_me():
 
 
 def upload_profile_image_for_current_user():
-    image = request.files.get("profile_image")
-    if image is None or not image.filename:
-        return jsonify({"error": "A profile image is required."}), 400
-    try:
-        validate_uploaded_file(image, "image")
-        url, public_id = upload_profile_image(image, "accounts", current_user.id, current_app.config)
-        old_public_id = current_user.profile_image_public_id
-        current_user.profile_image_url = url
-        current_user.profile_image_public_id = public_id
-        db.session.commit()
-        if old_public_id:
-            try:
-                delete_profile_image(old_public_id, current_app.config)
-            except Exception:
-                current_app.logger.exception("Could not delete the previous account profile image")
-        return jsonify({"message": "Profile image updated successfully.", "parent": current_user.to_dict()}), 200
-    except ValueError as exc:
-        db.session.rollback()
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Profile image upload failed."}), 500
+    from app.controllers.asset_controller import upload_user_profile_image
+
+    return upload_user_profile_image(legacy_response=True)
 
 
 def delete_profile_image_for_current_user():
-    old_public_id = current_user.profile_image_public_id
-    current_user.profile_image_url = None
-    current_user.profile_image_public_id = None
-    try:
-        db.session.commit()
-        if old_public_id:
-            delete_profile_image(old_public_id, current_app.config)
-        return jsonify({"message": "Profile image removed.", "parent": current_user.to_dict()}), 200
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Profile image removal failed."}), 500
+    from app.controllers.asset_controller import delete_user_profile_image_legacy
+
+    return delete_user_profile_image_legacy()
 
 
 def delete_me():
