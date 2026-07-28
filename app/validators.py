@@ -68,6 +68,7 @@ def is_safe_http_url(value):
     safe_scheme = scheme == "https" or (
         scheme == "http" and hostname in {"localhost", "127.0.0.1", "::1"}
     )
+    
     return (
         safe_scheme
         and bool(hostname)
