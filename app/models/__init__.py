@@ -9,6 +9,7 @@ from app.models.game_result_model import GameResult
 from app.models.leaderboard_model import LeaderboardEntry
 from app.models.book_narration_model import BookNarration
 from app.models.revoked_token_model import RevokedToken
+from app.models.asset_model import Asset
 
 __all__ = [
     "Parent",
@@ -22,4 +23,5 @@ __all__ = [
     "LeaderboardEntry",
     "BookNarration",
     "RevokedToken",
+    "Asset",
 ]

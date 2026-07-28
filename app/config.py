@@ -23,6 +23,18 @@ def _env_value(*names, default=""):
     return default
 
 
+def _positive_int_env(name, default):
+    """Read a positive integer setting with a clear startup error."""
+    raw_value = _env_value(name, default=str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
 def _build_database_uri():
     """Build the SQLAlchemy MySQL URI from whatever Railway (or local .env)
     variables are actually available.
@@ -111,9 +123,13 @@ class Config:
         else None
     )
     
-    CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
-    CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
-    CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+    CLOUDINARY_CLOUD_NAME = _env_value("CLOUDINARY_CLOUD_NAME")
+    CLOUDINARY_API_KEY = _env_value("CLOUDINARY_API_KEY")
+    CLOUDINARY_API_SECRET = _env_value("CLOUDINARY_API_SECRET")
+    CLOUDINARY_ROOT_FOLDER = _env_value(
+        "CLOUDINARY_ROOT_FOLDER",
+        default="teachalike",
+    )
 
     # Keep this server-side. Never expose the ElevenLabs key through Next.js
     # public environment variables or return it from an API response.
@@ -173,15 +189,27 @@ class Config:
   
     # Must accommodate the largest supported upload endpoint. Individual
     # routes still enforce their narrower per-asset limits below.
-    MAX_CONTENT_LENGTH = int(_env_value("MAX_CONTENT_LENGTH_MB", default="100")) * 1024 * 1024
+    MAX_CONTENT_LENGTH = (
+        _positive_int_env("MAX_CONTENT_LENGTH_MB", 1000) * 1024 * 1024
+    )
 
     # Per-asset limits are kept separate from Flask's request-wide limit so
     # each upload endpoint can return the correct validation response.
-    MAX_PROFILE_IMAGE_SIZE_MB = int(_env_value("MAX_PROFILE_IMAGE_SIZE_MB", default="5"))
-    MAX_CHILD_IMAGE_SIZE_MB = int(_env_value("MAX_CHILD_IMAGE_SIZE_MB", default="5"))
-    MAX_VOICE_PROFILE_SIZE_MB = int(_env_value("MAX_VOICE_PROFILE_SIZE_MB", default="25"))
-    MAX_BOOK_AUDIO_SIZE_MB = int(_env_value("MAX_BOOK_AUDIO_SIZE_MB", default="50"))
-    MAX_BOOK_VIDEO_SIZE_MB = int(_env_value("MAX_BOOK_VIDEO_SIZE_MB", default="100"))
+    MAX_PROFILE_IMAGE_SIZE_MB = _positive_int_env(
+        "MAX_PROFILE_IMAGE_SIZE_MB", 10
+    )
+    MAX_CHILD_IMAGE_SIZE_MB = _positive_int_env(
+        "MAX_CHILD_IMAGE_SIZE_MB", 10
+    )
+    MAX_VOICE_PROFILE_SIZE_MB = _positive_int_env(
+        "MAX_VOICE_PROFILE_SIZE_MB", 50
+    )
+    MAX_BOOK_AUDIO_SIZE_MB = _positive_int_env(
+        "MAX_BOOK_AUDIO_SIZE_MB", 250
+    )
+    MAX_BOOK_VIDEO_SIZE_MB = _positive_int_env(
+        "MAX_BOOK_VIDEO_SIZE_MB", 1000
+    )
     MAX_JSON_BODY_SIZE_BYTES = int(
         _env_value("MAX_JSON_BODY_SIZE_BYTES", default=str(1024 * 1024))
     )

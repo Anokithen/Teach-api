@@ -17,7 +17,7 @@ PREPARE drop_narration_unique_stmt FROM @drop_narration_unique;
 EXECUTE drop_narration_unique_stmt;
 DEALLOCATE PREPARE drop_narration_unique_stmt;
 
-CREATE TABLE assets (
+CREATE TABLE IF NOT EXISTS assets (
     id INTEGER NOT NULL AUTO_INCREMENT,
     owner_user_id INTEGER NOT NULL,
     child_id INTEGER NULL,

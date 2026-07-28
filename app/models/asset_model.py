@@ -79,6 +79,38 @@ class Asset(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
     deleted_at = db.Column(db.DateTime, nullable=True)
 
+    @classmethod
+    def from_cloudinary_metadata(
+        cls,
+        metadata,
+        *,
+        category,
+        owner_user_id,
+        active_slot=None,
+        status=STATUS_COMPLETED,
+        **relations,
+    ):
+        """Build an asset row from normalized storage-service metadata."""
+        return cls(
+            owner_user_id=owner_user_id,
+            asset_category=category,
+            active_slot=active_slot,
+            cloudinary_asset_id=metadata["asset_id"],
+            cloudinary_public_id=metadata["public_id"],
+            cloudinary_secure_url=metadata["secure_url"],
+            cloudinary_resource_type=metadata["resource_type"],
+            cloudinary_delivery_type=metadata.get("delivery_type") or "upload",
+            cloudinary_format=metadata.get("format"),
+            cloudinary_asset_folder=metadata["asset_folder"],
+            original_filename=metadata.get("original_filename"),
+            file_size_bytes=metadata.get("bytes"),
+            width=metadata.get("width"),
+            height=metadata.get("height"),
+            duration_seconds=metadata.get("duration"),
+            status=status,
+            **relations,
+        )
+
     def to_dict(self) -> dict:
         """Return the safe, client-facing representation."""
         return {
