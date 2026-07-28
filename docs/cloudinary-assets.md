@@ -18,6 +18,8 @@ CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_ROOT_FOLDER=teachalike
 CLOUDINARY_DELIVERY_TIMEOUT_SECONDS=60
+CLOUDINARY_UPLOAD_TIMEOUT_SECONDS=180
+GUNICORN_TIMEOUT=300
 
 MAX_CONTENT_LENGTH_MB=1000
 MAX_PROFILE_IMAGE_SIZE_MB=10
@@ -97,6 +99,14 @@ size, asset category, related records, ownership, and role before persistence.
 - Images: JPG, JPEG, PNG, WebP.
 - Audio: MP3, WAV, WebM, OGG, M4A, MP4.
 - Video: MP4, WebM, MOV.
+
+Voice samples are limited to 50 MB by default. Common browser MP3 MIME aliases
+and generic `application/octet-stream` uploads are accepted only when the
+filename extension and MP3 magic bytes also match. Voice upload requests may
+take longer than ordinary API calls because Cloudinary storage and ElevenLabs
+cloning are completed together; the dedicated Cloudinary timeout and Gunicorn
+timeout above prevent the general request limit from cutting off valid larger
+files.
 
 Expected errors are `400` for missing/malformed input, `403` for denied
 management, `404` for missing related entities, `413` for size limits, `415`

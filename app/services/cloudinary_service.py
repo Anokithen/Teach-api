@@ -38,7 +38,16 @@ ALLOWED_MIME_TYPES = {
         "mov": {"video/quicktime"},
     },
     "audio": {
-        "mp3": {"audio/mpeg", "audio/mp3"},
+        # Browser and operating-system MIME databases are inconsistent for
+        # MP3 files. Content is still checked using magic bytes below.
+        "mp3": {
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/x-mpeg",
+            "audio/x-mp3",
+            "audio/mpeg3",
+            "audio/x-mpeg3",
+        },
         "wav": {"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"},
         "webm": {"audio/webm"},
         "ogg": {"audio/ogg"},
@@ -59,11 +68,19 @@ def validate_uploaded_file(file, media_type):
     if extension not in allowed:
         formats = ", ".join(sorted(allowed))
         raise ValueError(f"Unsupported {media_type} format. Allowed formats: {formats}.")
-    if mime_type not in allowed[extension]:
-        expected = ", ".join(sorted(allowed[extension]))
-        raise ValueError(f"The uploaded .{extension} file must have MIME type: {expected}.")
     if not _has_expected_signature(file, media_type, extension):
         raise ValueError(f"The uploaded file contents do not match the .{extension} format.")
+
+    # Some browsers send locally selected audio with no MIME type, which
+    # becomes application/octet-stream in multipart form data. Accept that
+    # generic type only when extension and magic bytes both identify audio.
+    generic_audio_type = media_type == "audio" and mime_type in {
+        "",
+        "application/octet-stream",
+    }
+    if mime_type not in allowed[extension] and not generic_audio_type:
+        expected = ", ".join(sorted(allowed[extension]))
+        raise ValueError(f"The uploaded .{extension} file must have MIME type: {expected}.")
     return extension
 
 
@@ -215,12 +232,16 @@ def upload_asset(
     credentials or implementation details through an HTTP response.
     """
     try:
-        cloudinary = configure_cloudinary(_operation_config(config))
+        operation_config = _operation_config(config)
+        cloudinary = configure_cloudinary(operation_config)
         upload_kwargs = {
             "resource_type": resource_type,
             "asset_folder": asset_folder,
             "overwrite": overwrite,
             "type": delivery_type,
+            "timeout": int(
+                operation_config.get("CLOUDINARY_UPLOAD_TIMEOUT_SECONDS", 180)
+            ),
             **upload_options,
         }
         if public_id:

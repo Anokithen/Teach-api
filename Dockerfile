@@ -16,4 +16,4 @@ RUN python -m pip install --no-cache-dir --upgrade pip==26.1.2 \
 
 COPY . .
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-5000} --threads 4 --timeout 120 --access-logfile - --error-logfile - run:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-5000} --threads 4 --timeout ${GUNICORN_TIMEOUT:-300} --access-logfile - --error-logfile - run:app"]

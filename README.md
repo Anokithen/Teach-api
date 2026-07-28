@@ -144,6 +144,8 @@ CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_ROOT_FOLDER=teachalike
 CLOUDINARY_DELIVERY_TIMEOUT_SECONDS=60
+CLOUDINARY_UPLOAD_TIMEOUT_SECONDS=180
+GUNICORN_TIMEOUT=300
 MAX_CONTENT_LENGTH_MB=1000
 MAX_PROFILE_IMAGE_SIZE_MB=10
 MAX_CHILD_IMAGE_SIZE_MB=10
@@ -151,6 +153,13 @@ MAX_VOICE_PROFILE_SIZE_MB=50
 MAX_BOOK_AUDIO_SIZE_MB=250
 MAX_BOOK_VIDEO_SIZE_MB=1000
 ```
+
+Voice-profile uploads accept MP3, WAV, WebM, OGG, M4A, and MP4 audio up to
+50 MB by default. MP3 MIME aliases used by desktop and mobile browsers are
+accepted only after the extension and MP3 magic bytes are verified. The
+frontend does not apply its general 60-second timeout to this workflow because
+the API securely stores the sample and clones it with ElevenLabs before
+responding.
 
 See [`docs/cloudinary-assets.md`](docs/cloudinary-assets.md) for folder
 mappings, supported formats, endpoints, cURL examples, replacement/deletion

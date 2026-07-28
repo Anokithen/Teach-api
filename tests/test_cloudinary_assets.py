@@ -46,6 +46,7 @@ from app.services.cloudinary_service import (
     upload_book_narration,
     upload_profile_image,
     upload_voice_sample,
+    validate_uploaded_file,
 )
 
 
@@ -152,6 +153,30 @@ class PathServiceTests(unittest.TestCase):
 
 
 class CloudinaryServiceTests(unittest.TestCase):
+    def test_mp3_validation_accepts_browser_mime_variants(self):
+        for mime_type in (
+            "audio/mpeg",
+            "audio/x-mpeg",
+            "audio/x-mp3",
+            "application/octet-stream",
+        ):
+            with self.subTest(mime_type=mime_type):
+                upload = FileStorage(
+                    stream=io.BytesIO(MP3),
+                    filename="voice.mp3",
+                    content_type=mime_type,
+                )
+                self.assertEqual(validate_uploaded_file(upload, "audio"), "mp3")
+
+    def test_generic_audio_mime_still_requires_valid_magic_bytes(self):
+        upload = FileStorage(
+            stream=io.BytesIO(b"not an mp3"),
+            filename="voice.mp3",
+            content_type="application/octet-stream",
+        )
+        with self.assertRaisesRegex(ValueError, "contents do not match"):
+            validate_uploaded_file(upload, "audio")
+
     def test_missing_configuration_is_sanitized(self):
         with patch("app.services.cloudinary_service._cloudinary_modules") as modules:
             modules.return_value = SimpleNamespace(config=MagicMock())
@@ -657,6 +682,37 @@ class AssetEndpointTests(unittest.TestCase):
             1,
         )
 
+    def test_voice_profile_accepts_mp3_larger_than_five_mb(self):
+        mp3_sample = MP3 + (b"\0" * (6 * 1024 * 1024))
+        with (
+            patch(
+                "app.controllers.voice_profile_controller.upload_asset",
+                side_effect=self._upload_result,
+            ) as upload,
+            patch(
+                "app.controllers.voice_profile_controller.clone_voice",
+                return_value="elevenlabs-large-mp3",
+            ),
+        ):
+            response = self.client.post(
+                "/api/voice-profiles",
+                headers=self._headers(self.owner),
+                data={
+                    "audio": (
+                        io.BytesIO(mp3_sample),
+                        "voice.mp3",
+                        "audio/x-mpeg",
+                    )
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 201, response.json)
+        self.assertEqual(upload.call_args.kwargs["format"], "mp3")
+        response.request.environ["wsgi.input"].close()
+        response.request.close()
+        response.close()
+
     @patch("app.controllers.asset_controller.upload_asset")
     def test_multiple_narrations_and_voice_profiles_are_distinct(self, upload):
         upload.side_effect = self._upload_result
@@ -1100,6 +1156,10 @@ class AssetEndpointTests(unittest.TestCase):
         self.assertEqual(
             uploader.upload.call_args.kwargs["asset_folder"],
             "teachalike/1/Audio/Voice_profiles",
+        )
+        self.assertEqual(
+            uploader.upload.call_args.kwargs["timeout"],
+            self.app.config["CLOUDINARY_UPLOAD_TIMEOUT_SECONDS"],
         )
         self.assertNotIn("folder", uploader.upload.call_args.kwargs)
 

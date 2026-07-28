@@ -55,7 +55,7 @@ def create_voice_profile(asset_response=False):
     except ValueError as exc:
         if asset_response:
             return _asset_error(str(exc), 415)
-        return jsonify({"errors": [str(exc)]}), 400
+        return jsonify({"errors": [str(exc)]}), 415
     limit_mb = current_app.config["MAX_VOICE_PROFILE_SIZE_MB"]
     try:
         validate_upload_size(sample, limit_mb)

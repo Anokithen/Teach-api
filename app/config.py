@@ -134,6 +134,10 @@ class Config:
         "CLOUDINARY_DELIVERY_TIMEOUT_SECONDS",
         60,
     )
+    CLOUDINARY_UPLOAD_TIMEOUT_SECONDS = _positive_int_env(
+        "CLOUDINARY_UPLOAD_TIMEOUT_SECONDS",
+        180,
+    )
 
     # Keep this server-side. Never expose the ElevenLabs key through Next.js
     # public environment variables or return it from an API response.
