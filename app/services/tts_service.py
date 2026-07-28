@@ -84,11 +84,14 @@ def _to_wav(source, destination):
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            timeout=120,
         )
     except FileNotFoundError as exc:
         raise TTSError("The configured ffmpeg binary could not be started. Check FFMPEG_BINARY.") from exc
     except subprocess.CalledProcessError as exc:
         raise TTSError("The reference voice recording could not be converted for XTTS.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise TTSError("The reference voice recording took too long to convert.") from exc
 
 
 @lru_cache(maxsize=2)

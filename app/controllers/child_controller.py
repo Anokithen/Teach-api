@@ -6,6 +6,8 @@ from app.models.child_model import Child
 from app.models.parent_model import Parent, ROLE_PARENT
 from app.middleware import can_access_child
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
+from app.security import pin_attempts
+from app.validators import MAX_NAME_LENGTH
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
@@ -21,6 +23,8 @@ def _validate_child_payload(data, partial=False):
         name = data.get("name")
         if name is None or str(name).strip() == "":
             errors.append("name is required.")
+        elif len(str(name).strip()) > MAX_NAME_LENGTH:
+            errors.append(f"name must be {MAX_NAME_LENGTH} characters or fewer.")
 
     if "age" in data or not partial:
         age = data.get("age")
@@ -67,6 +71,15 @@ def _resolve_owning_parent(data):
     parent_id = data.get("parent_id") if data else None
     if not parent_id:
         return None, ["parent_id is required when a teacher adds a child."]
+
+    if isinstance(parent_id, bool) or not isinstance(parent_id, (int, str)):
+        return None, ["parent_id must reference an existing parent account."]
+    try:
+        parent_id = int(parent_id)
+    except (TypeError, ValueError):
+        return None, ["parent_id must reference an existing parent account."]
+    if parent_id <= 0:
+        return None, ["parent_id must reference an existing parent account."]
 
     owning_parent = db.session.get(Parent, parent_id)
     if not owning_parent or owning_parent.role != ROLE_PARENT:
@@ -228,8 +241,21 @@ def verify_child_pin(child_id):
         return jsonify({"errors": ["pin must contain exactly six digits."]}), 400
     if not child.child_pin_hash:
         return jsonify({"error": "This child does not have a profile PIN."}), 400
+    limit_key = f"pin:{current_user.id}:{child.id}"
+    limit = current_app.config["PIN_RATE_LIMIT_ATTEMPTS"]
+    window = current_app.config["PIN_RATE_LIMIT_WINDOW_SECONDS"]
+    blocked, retry_after = pin_attempts.blocked(limit_key, limit, window)
+    if blocked:
+        response = jsonify(
+            {"error": "Too many incorrect PIN attempts. Please try again later."}
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     if not child.check_pin(pin):
+        pin_attempts.record_failure(limit_key, window)
         return jsonify({"error": "The profile PIN is incorrect."}), 401
+    pin_attempts.reset(limit_key)
     return jsonify({"message": "Profile PIN verified."}), 200
 
 

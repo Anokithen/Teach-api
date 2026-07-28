@@ -1,11 +1,11 @@
 from flask import current_app, jsonify, request
 from flask_jwt_extended import current_user
-from email_validator import validate_email, EmailNotValidError
-
 from app.extensions import db
+from sqlalchemy.exc import IntegrityError
 from app.models.parent_model import Parent
 from app.services.account_cleanup_service import collect_account_asset_refs, schedule_account_asset_cleanup
 from app.services.cloudinary_service import delete_profile_image, upload_profile_image, validate_uploaded_file
+from app.validators import validate_account_email, validate_name, validate_password
 
 
 def get_me():
@@ -21,28 +21,28 @@ def update_me():
     parent = current_user
 
     if "name" in data:
-        name = data.get("name")
-        if not name or str(name).strip() == "":
-            errors.append("name cannot be empty.")
+        name, error = validate_name(data.get("name"))
+        if error:
+            errors.append(error.replace("is required", "cannot be empty"))
+        else:
+            data["name"] = name
 
     if "email" in data:
-        email = data.get("email")
-        if not email or str(email).strip() == "":
-            errors.append("email cannot be empty.")
+        email, error = validate_account_email(data.get("email"))
+        if error:
+            errors.append(error.replace("is required", "cannot be empty"))
         else:
-            try:
-                emailinfo = validate_email(str(email).strip(), check_deliverability=False)
-                data["email"] = emailinfo.normalized
-                existing = Parent.query.filter_by(email=data["email"]).first()
-                if existing and existing.id != parent.id:
-                    errors.append("An account with this email already exists.")
-            except EmailNotValidError as e:
-                errors.append(str(e))
+            data["email"] = email
+            existing = Parent.query.filter_by(email=email).first()
+            if existing and existing.id != parent.id:
+                errors.append("An account with this email already exists.")
 
     if "password" in data:
-        password = data.get("password")
-        if not password or len(str(password)) < 6:
-            errors.append("password must be at least 6 characters.")
+        password, error = validate_password(data.get("password"))
+        if error:
+            errors.append(error)
+        else:
+            data["password"] = password
 
     if errors:
         return jsonify({"errors": errors}), 400
@@ -57,6 +57,9 @@ def update_me():
 
         db.session.commit()
         return jsonify({"message": "Profile updated successfully.", "parent": parent.to_dict()}), 200
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "An account with this email already exists."}), 409
     except Exception:
         db.session.rollback()
         return jsonify({"error": "An internal server error occurred."}), 500

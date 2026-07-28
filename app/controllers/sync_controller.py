@@ -17,6 +17,10 @@ from app.middleware import child_belongs_to_current_parent
 from app.middleware import voice_profile_belongs_to_current_parent
 from app.controllers.game_result_controller import _award_leaderboard_points, _maximum_game_score
 
+MAX_SYNC_ITEMS_PER_TYPE = 100
+MAX_PROGRESS_ENTRIES = 1000
+MAX_FEEDBACK_TEXT_LENGTH = 2000
+
 
 def _parse_sync_datetime(value, field_name):
     """Parse the ISO timestamps emitted by offline clients."""
@@ -88,6 +92,15 @@ def sync_offline_activity():
     feedback_in, feedback_error = _as_list(data.get("feedback"), "feedback")
     game_results_in, games_error = _as_list(data.get("game_results"), "game_results")
     list_errors = [error for error in (reading_error, feedback_error, games_error) if error]
+    for field_name, entries in (
+        ("reading_sessions", reading_sessions_in),
+        ("feedback", feedback_in),
+        ("game_results", game_results_in),
+    ):
+        if len(entries) > MAX_SYNC_ITEMS_PER_TYPE:
+            list_errors.append(
+                f"{field_name} cannot contain more than {MAX_SYNC_ITEMS_PER_TYPE} entries."
+            )
     if list_errors:
         return jsonify({"errors": list_errors}), 400
 
@@ -148,6 +161,12 @@ def sync_offline_activity():
             if progress_log is not None and not isinstance(progress_log, list):
                 errors.append(f"reading_session with client_id={item.get('client_id')}: progress_log must be an array.")
                 continue
+            if isinstance(progress_log, list) and len(progress_log) > MAX_PROGRESS_ENTRIES:
+                errors.append(
+                    f"reading_session with client_id={item.get('client_id')}: "
+                    f"progress_log cannot contain more than {MAX_PROGRESS_ENTRIES} entries."
+                )
+                continue
 
             session = ReadingSession(
                 child_id=child_id,
@@ -186,6 +205,12 @@ def sync_offline_activity():
                 continue
             if not isinstance(feedback_text, str) or not feedback_text.strip():
                 errors.append("feedback entry: feedback_text is required.")
+                continue
+            if len(feedback_text.strip()) > MAX_FEEDBACK_TEXT_LENGTH:
+                errors.append(
+                    f"feedback entry: feedback_text must be "
+                    f"{MAX_FEEDBACK_TEXT_LENGTH} characters or fewer."
+                )
                 continue
 
             feedback = Feedback(

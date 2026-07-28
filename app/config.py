@@ -1,5 +1,6 @@
 from datetime import timedelta
 import os
+import secrets
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -75,18 +76,19 @@ class Config:
         "pool_recycle": 280,
         "connect_args": {"connect_timeout": 5},
     }
-    # Long enough for HS256 in local development. Production deployments must
-    # override this documented fallback with a unique random secret.
+    # Generate an unpredictable development key instead of shipping a known
+    # signing secret. Production deployments must set JWT_SECRET_KEY so tokens
+    # remain valid across workers and restarts.
     JWT_SECRET_KEY = _env_value(
         "JWT_SECRET_KEY",
-        default="development-only-jwt-secret-change-before-production",
+        default=secrets.token_urlsafe(48),
     )
     
     _access_token_minutes = _env_value("JWT_ACCESS_TOKEN_EXPIRES_MINUTES")
     JWT_ACCESS_TOKEN_EXPIRES = (
         timedelta(minutes=int(_access_token_minutes))
         if _access_token_minutes
-        else timedelta(days=int(_env_value("JWT_TIMEOUT", default="15")))
+        else timedelta(minutes=15)
     )
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(
         days=int(os.getenv("JWT_REFRESH_TOKEN_EXPIRES_DAYS", "30"))
@@ -98,6 +100,18 @@ class Config:
         for origin in _frontend_origin_values
         if origin.strip()
     ] or ["*"]
+    TRUST_PROXY_HOPS = int(
+        _env_value(
+            "TRUST_PROXY_HOPS",
+            default="1" if os.getenv("RAILWAY_ENVIRONMENT") else "0",
+        )
+    )
+    _trusted_hosts = _env_value("TRUSTED_HOSTS")
+    TRUSTED_HOSTS = (
+        [host.strip() for host in _trusted_hosts.split(",") if host.strip()]
+        if _trusted_hosts
+        else None
+    )
     
     CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
     CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
@@ -170,3 +184,24 @@ class Config:
     MAX_VOICE_PROFILE_SIZE_MB = int(_env_value("MAX_VOICE_PROFILE_SIZE_MB", default="25"))
     MAX_BOOK_AUDIO_SIZE_MB = int(_env_value("MAX_BOOK_AUDIO_SIZE_MB", default="50"))
     MAX_BOOK_VIDEO_SIZE_MB = int(_env_value("MAX_BOOK_VIDEO_SIZE_MB", default="100"))
+    MAX_JSON_BODY_SIZE_BYTES = int(
+        _env_value("MAX_JSON_BODY_SIZE_BYTES", default=str(1024 * 1024))
+    )
+    LOGIN_RATE_LIMIT_ATTEMPTS = int(
+        _env_value("LOGIN_RATE_LIMIT_ATTEMPTS", default="10")
+    )
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(
+        _env_value("LOGIN_RATE_LIMIT_WINDOW_SECONDS", default="900")
+    )
+    REGISTER_RATE_LIMIT_ATTEMPTS = int(
+        _env_value("REGISTER_RATE_LIMIT_ATTEMPTS", default="20")
+    )
+    REGISTER_RATE_LIMIT_WINDOW_SECONDS = int(
+        _env_value("REGISTER_RATE_LIMIT_WINDOW_SECONDS", default="3600")
+    )
+    PIN_RATE_LIMIT_ATTEMPTS = int(
+        _env_value("PIN_RATE_LIMIT_ATTEMPTS", default="5")
+    )
+    PIN_RATE_LIMIT_WINDOW_SECONDS = int(
+        _env_value("PIN_RATE_LIMIT_WINDOW_SECONDS", default="300")
+    )

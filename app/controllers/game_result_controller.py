@@ -29,9 +29,9 @@ def _award_leaderboard_points(child_id, points):
 def _maximum_game_score(game):
     """Return the maximum score supported by the built-in game content.
 
-    Scores are submitted by the browser, so the API must enforce the same
-    ceiling before adding points to the leaderboard. Unknown/custom game
-    types remain unrestricted for backwards compatibility.
+    Scores are submitted by the browser, so the API must enforce a ceiling
+    before adding points to the leaderboard. Unknown/custom game types use a
+    conservative default rather than allowing arbitrary leaderboard points.
     """
     content = game.content if isinstance(game.content, dict) else {}
     if game.game_type == "quiz":
@@ -40,7 +40,14 @@ def _maximum_game_score(game):
     if game.game_type in {"word_puzzle", "spelling"}:
         words = content.get("words")
         return min(len(words), 10) * 10 if isinstance(words, list) else None
-    return None
+    configured_maximum = content.get("max_score")
+    if (
+        isinstance(configured_maximum, int)
+        and not isinstance(configured_maximum, bool)
+        and 0 <= configured_maximum <= 1000
+    ):
+        return configured_maximum
+    return 100
 
 
 def submit_game_result(game_id):

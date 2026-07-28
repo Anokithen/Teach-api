@@ -140,7 +140,7 @@ Do not invent events, characters, facts, or vocabulary that are not supported by
                     "maxOutputTokens": 2600,
                 },
             },
-            timeout=int(config.get("GEMINI_REQUEST_TIMEOUT", 45)),
+            timeout=(10, max(1, int(config.get("GEMINI_REQUEST_TIMEOUT", 45)))),
         )
     except requests.RequestException as exc:
         raise GeminiError("Gemini could not be reached while creating this quiz.") from exc
@@ -198,7 +198,7 @@ Return only the story title and story text in the requested JSON format.
                     "maxOutputTokens": 1800,
                 },
             },
-            timeout=int(config.get("GEMINI_REQUEST_TIMEOUT", 45)),
+            timeout=(10, max(1, int(config.get("GEMINI_REQUEST_TIMEOUT", 45)))),
         )
     except requests.RequestException as exc:
         raise GeminiError("Gemini could not be reached while creating this book draft.") from exc

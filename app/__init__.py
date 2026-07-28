@@ -1,8 +1,9 @@
 import os
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy import inspect, text
 
@@ -14,6 +15,13 @@ from app.routes import register_blueprints
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    proxy_hops = app.config["TRUST_PROXY_HOPS"]
+    if proxy_hops:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_hops,
+            x_proto=proxy_hops,
+        )
     CORS(
         app,
         resources={r"/api/*": {"origins": app.config["FRONTEND_ORIGINS"]}},
@@ -23,7 +31,45 @@ def create_app():
     db.init_app(app)
     jwt.init_app(app)
 
-    from app.models import Parent  # noqa: F401  (this import loads app/models/__init__.py,
+    @app.before_request
+    def reject_oversized_json():
+        if (
+            request.is_json
+            and request.content_length is not None
+            and request.content_length > app.config["MAX_JSON_BODY_SIZE_BYTES"]
+        ):
+            return jsonify({"error": "The JSON request body is too large."}), 413
+        if request.is_json and request.method in {"POST", "PATCH", "PUT"}:
+            payload = request.get_json(silent=True)
+            if payload is None:
+                return jsonify({"error": "The JSON request body is invalid."}), 400
+            if not isinstance(payload, dict):
+                return jsonify({"error": "The JSON request body must be an object."}), 400
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), geolocation=(), microphone=(self)",
+        )
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        )
+        if request.path.startswith("/api/auth/") or request.headers.get("Authorization"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        if request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+        return response
+
+    from app.models import Parent, RevokedToken  # noqa: F401  (this import loads app/models/__init__.py,
     # which in turn imports every model class so they register with SQLAlchemy)
 
     if os.getenv("AUTO_CREATE_TABLES", "true").lower() == "true":
@@ -48,8 +94,7 @@ def create_app():
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(_jwt_header, jwt_payload):
-        from app.controllers.auth_controller import BLOCKLIST
-        if jwt_payload["jti"] in BLOCKLIST:
+        if RevokedToken.query.filter_by(jti=jwt_payload["jti"]).first() is not None:
             return True
 
         # A banned account's outstanding tokens are treated as revoked too,

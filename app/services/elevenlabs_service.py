@@ -213,8 +213,13 @@ def _combine_mp3_files(paths, destination, config):
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            timeout=max(30, int(config.get("ELEVENLABS_REQUEST_TIMEOUT", 120))),
         )
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as exc:
         raise ElevenLabsError("The generated narration chunks could not be combined.") from exc
     finally:
         if os.path.exists(manifest_path):

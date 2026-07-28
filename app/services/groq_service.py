@@ -68,7 +68,7 @@ def _models_response(config):
         response = requests.get(
             f"{_base_url(config)}/models",
             headers=_headers(config),
-            timeout=max(5, int(config.get("GROQ_REQUEST_TIMEOUT", 20))),
+            timeout=(10, max(5, int(config.get("GROQ_REQUEST_TIMEOUT", 20)))),
         )
     except requests.RequestException as err:
         raise GroqError("Groq could not be reached while loading available models.") from err

@@ -95,7 +95,7 @@ Do not wrap the JSON in markdown fences.
                 "max_tokens": 2200,
                 "stream": False,
             },
-            timeout=int(config.get("NVIDIA_REQUEST_TIMEOUT", 60)),
+            timeout=(10, max(1, int(config.get("NVIDIA_REQUEST_TIMEOUT", 60)))),
         )
     except requests.RequestException as exc:
         raise NvidiaError("NVIDIA could not be reached while creating this book draft.") from exc
