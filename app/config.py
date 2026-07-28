@@ -75,7 +75,12 @@ class Config:
         "pool_recycle": 280,
         "connect_args": {"connect_timeout": 5},
     }
-    JWT_SECRET_KEY = _env_value("JWT_SECRET_KEY", default="super-secret-key-change-me")
+    # Long enough for HS256 in local development. Production deployments must
+    # override this documented fallback with a unique random secret.
+    JWT_SECRET_KEY = _env_value(
+        "JWT_SECRET_KEY",
+        default="development-only-jwt-secret-change-before-production",
+    )
     
     _access_token_minutes = _env_value("JWT_ACCESS_TOKEN_EXPIRES_MINUTES")
     JWT_ACCESS_TOKEN_EXPIRES = (
